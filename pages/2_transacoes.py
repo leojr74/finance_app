@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder
 
-from database import carregar_transacoes, atualizar_categorias
+from database import carregar_transacoes
 from categorizer import load_categories, add_rule, clean_description
+from services.transaction_service import save_all_changes
 
 st.title("📊 Transações")
 
@@ -13,7 +13,7 @@ st.title("📊 Transações")
 # carregar dados
 # --------------------------------------------------
 
-if "transacoes_df" not in st.session_state:
+if "transacoes_original" not in st.session_state:
 
     df = carregar_transacoes()
 
@@ -23,12 +23,13 @@ if "transacoes_df" not in st.session_state:
 
     df["categoria"] = df["categoria"].fillna("Sem categoria")
 
-    st.session_state.transacoes_df = df
+    st.session_state.transacoes_original = df.copy()
+    st.session_state.transacoes_df = df.copy()
 
 df = st.session_state.transacoes_df.copy()
 
 # --------------------------------------------------
-# converter data para datetime
+# converter data
 # --------------------------------------------------
 
 df["data"] = pd.to_datetime(df["data"], format="%d/%m/%Y", errors="coerce")
@@ -43,7 +44,7 @@ categorias = sorted(set(rules.values()))
 categorias.append("Sem categoria")
 
 # --------------------------------------------------
-# configurar grid
+# grid
 # --------------------------------------------------
 
 gb = GridOptionsBuilder.from_dataframe(df)
@@ -62,13 +63,20 @@ gb.configure_column(
 
 gb.configure_column(
     "data",
+    editable=True,
     type=["dateColumnFilter", "customDateTimeFormat"],
     custom_format_string="dd/MM/yyyy",
 )
 
 gb.configure_column(
     "valor",
+    editable=True,
     type=["numericColumn"],
+)
+
+gb.configure_column(
+    "descricao",
+    editable=True,
 )
 
 gridOptions = gb.build()
@@ -76,7 +84,7 @@ gridOptions = gb.build()
 grid_response = AgGrid(
     df,
     gridOptions=gridOptions,
-    update_mode=GridUpdateMode.VALUE_CHANGED,
+    update_on=["cellValueChanged", "selectionChanged"],
     height=500,
     fit_columns_on_grid_load=True,
 )
@@ -85,12 +93,78 @@ edited_df = pd.DataFrame(grid_response["data"])
 selected_rows = pd.DataFrame(grid_response["selected_rows"])
 
 # --------------------------------------------------
-# corrigir formato da data
+# corrigir data
 # --------------------------------------------------
 
 edited_df["data"] = pd.to_datetime(
     edited_df["data"], errors="coerce"
 ).dt.strftime("%d/%m/%Y")
+
+# --------------------------------------------------
+# detectar mudança de categoria
+# --------------------------------------------------
+
+original = st.session_state.transacoes_original
+
+merged = edited_df.merge(
+    original[["id", "categoria"]],
+    on="id",
+    how="left",
+    suffixes=("", "_original")
+)
+
+changed = merged[merged["categoria"] != merged["categoria_original"]]
+
+# --------------------------------------------------
+# popup aprendizado
+# --------------------------------------------------
+
+if len(changed) == 1 and not st.session_state.get("rule_prompted", False):
+
+    row = changed.iloc[0]
+
+    st.session_state.rule_prompted = True
+
+    @st.dialog("Aprender regra?")
+    def dialog_aprender(descricao, categoria):
+
+        st.write(
+            f"A categoria da transação **{descricao}** foi alterada para **{categoria}**."
+        )
+
+        st.write("Deseja aprender essa regra para futuras transações?")
+
+        col1, col2 = st.columns(2)
+
+        if col1.button("Sim"):
+
+            regra = clean_description(descricao)
+            add_rule(regra, categoria)
+
+            mask = st.session_state.transacoes_df["descricao"] == descricao
+            st.session_state.transacoes_df.loc[mask, "categoria"] = categoria
+
+            st.session_state.rule_prompted = False
+
+            st.session_state.transacoes_original = st.session_state.transacoes_df.copy()
+
+            st.success("Regra aprendida")
+
+            st.rerun()
+
+        if col2.button("Não"):
+
+            st.session_state.rule_prompted = False
+
+            st.session_state.transacoes_original = st.session_state.transacoes_df.copy()
+
+            st.rerun()
+
+    dialog_aprender(row["descricao"], row["categoria"])
+
+# --------------------------------------------------
+# atualizar estado
+# --------------------------------------------------
 
 st.session_state.transacoes_df = edited_df
 
@@ -106,17 +180,11 @@ if len(selected_rows) > 0:
 
     categoria = st.selectbox("Escolher categoria", categorias)
 
-    aplicar_outras = st.checkbox(
-        "Aplicar regra às outras transações iguais",
-        value=True
-    )
-
     if st.button("🏷 Aplicar às selecionadas e aprender regra"):
 
-        # corrigir índice vindo do grid
-        idx = selected_rows.index.astype(int)
+        ids = selected_rows["id"].tolist()
 
-        edited_df.loc[idx, "categoria"] = categoria
+        edited_df.loc[ids, "categoria"] = categoria
 
         descricoes = selected_rows["descricao"].unique()
 
@@ -125,10 +193,8 @@ if len(selected_rows) > 0:
             regra = clean_description(desc)
             add_rule(regra, categoria)
 
-            if aplicar_outras:
-
-                mask = edited_df["descricao"] == desc
-                edited_df.loc[mask, "categoria"] = categoria
+            mask = edited_df["descricao"] == desc
+            edited_df.loc[mask, "categoria"] = categoria
 
         st.session_state.transacoes_df = edited_df
 
@@ -138,31 +204,13 @@ if len(selected_rows) > 0:
 
     if st.button("🗑 Excluir selecionadas"):
 
-        idx = selected_rows.index.astype(int)
+        ids = selected_rows["id"].tolist()
 
-        deletar = edited_df.loc[idx]
-
-        edited_df = edited_df.drop(idx).reset_index(drop=True)
+        edited_df = edited_df.drop(ids).reset_index(drop=True)
 
         st.session_state.transacoes_df = edited_df
 
-        try:
-
-            if "id" in deletar.columns:
-
-                conn = sqlite3.connect("transacoes.db")
-                cursor = conn.cursor()
-
-                for i in deletar["id"]:
-                    cursor.execute("DELETE FROM transacoes WHERE id=?", (int(i),))
-
-                conn.commit()
-                conn.close()
-
-        except:
-            pass
-
-        st.success("Transações excluídas")
+        st.success("Transações marcadas para exclusão")
 
         st.rerun()
 
@@ -172,11 +220,13 @@ if len(selected_rows) > 0:
 
 st.divider()
 
-if st.button("💾 Salvar alterações de categoria"):
+if st.button("💾 Salvar alterações no banco de dados"):
 
-    atualizar_categorias(st.session_state.transacoes_df)
+    save_all_changes(st.session_state.transacoes_df)
 
-    st.success("Categorias atualizadas no banco")
+    st.session_state.transacoes_original = st.session_state.transacoes_df.copy()
+
+    st.success("Banco de dados atualizado")
 
 # --------------------------------------------------
 # total

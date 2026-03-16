@@ -139,7 +139,17 @@ def carregar_transacoes():
 
     try:
         df = pd.read_sql_query(
-            "SELECT data, descricao, valor, categoria, banco FROM transacoes ORDER BY data",
+            """
+            SELECT
+                id,
+                data,
+                descricao,
+                valor,
+                categoria,
+                banco
+            FROM transacoes
+            ORDER BY data
+            """,
             conn
         )
     finally:
