@@ -71,14 +71,8 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
             if sinal == "-":
                 valor = -valor
 
-            dia = int(data.split("/")[0])
-
-            data_final = ajustar_data_compra(
-                dia,
-                mes_fatura,
-                ano_fatura
-            )
-
+            
+            
             print(f"{data} | {desc} | {valor}")
 
             transactions.append({

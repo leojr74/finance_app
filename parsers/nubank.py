@@ -77,7 +77,7 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
                 key = (f"{dia}/{mes_str}", desc.strip(), value)
                 
                 extracted_count += 1
-                data = ajustar_data_compra(int(dia), mes_fatura, ano_fatura)
+                data = f"{int(dia):02d}/{mes_num:02d}"
                 
                 cat = "Sem categoria"
                 if 'pagamento' in desc.lower():

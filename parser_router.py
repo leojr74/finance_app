@@ -36,37 +36,31 @@ PARSERS = {
 
 
 def reconstruir_data(data_raw, data_inicio, data_fim, descricao=""):
-    """
-    Reconstrói data garantindo que fique dentro do período da fatura.
-    Corrige também casos de parcelas onde o banco mostra a data da compra original.
-    """
+
     try:
-        parts = data_raw.split("/")
-        dia = int(parts[0])
-        mes = int(parts[1])
+        dia, mes = map(int, data_raw.split("/"))
     except:
         return None
 
-    anos = [data_inicio.year, data_fim.year]
-
-    for ano in anos:
-        try:
-            data = datetime.date(ano, mes, dia)
-
-            if data_inicio <= data <= data_fim:
-                return data
-        except:
-            pass
-
-    # tratamento especial para parcelas
-    if "PARCELA" in descricao.upper():
-        try:
-            return datetime.date(data_fim.year, data_fim.month, dia)
-        except:
-            pass
-
+    # tentativa 1: ano da data_inicio
     try:
-        return datetime.date(data_fim.year, mes, dia)
+        data = datetime.date(data_inicio.year, mes, dia)
+    except:
+        return None
+
+    # se ficou dentro do período → ok
+    if data_inicio <= data <= data_fim:
+        return data
+
+    # tentativa 2: usar mês da data_fim (último mês possível)
+    try:
+        data = datetime.date(data_fim.year, mes, dia)
+    except:
+        return None
+
+    # se ainda estiver fora, realocar para o último mês da fatura
+    try:
+        return datetime.date(data_fim.year, data_fim.month, dia)
     except:
         return None
 
@@ -91,6 +85,10 @@ def normalizar_transacoes(transactions, data_inicio, data_fim):
             continue
 
         data_final = reconstruir_data(data_raw, data_inicio, data_fim, desc)
+
+        print(
+            f"[DATA DEBUG] raw={data_raw} | inicio={data_inicio} | fim={data_fim} | reconstruida={data_final} | desc={desc[:40]}"
+        )
 
         if not data_final:
             continue
@@ -121,11 +119,19 @@ def extract_transactions_auto(pdf_path, data_inicio, data_fim):
 
     if not parser:
         raise ValueError(f"Parser não encontrado para banco: {bank}")
+    
+    print(f"[ROUTER] banco detectado: {bank}")
+    print(f"[ROUTER] periodo fatura: {data_inicio} -> {data_fim}")
 
     mes_fatura = data_fim.month
     ano_fatura = data_fim.year
 
     raw_transactions = parser(pdf_path, mes_fatura, ano_fatura)
+
+    print("\n[RAW TRANSACTIONS SAMPLE]")
+    for t in raw_transactions[:10]:
+        print(t)
+    print()
 
     transactions = normalizar_transacoes(
         raw_transactions,
