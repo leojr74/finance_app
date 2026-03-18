@@ -35,7 +35,7 @@ if "df_transacoes" not in st.session_state:
 
 # --- 2. FILTROS E CATEGORIAS ---
 st.write("---")
-c1, c2, c3 = st.columns([1.5, 1.5, 1])
+c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
 
 with c1:
     datas_limite = (st.session_state.df_transacoes["data"].min(), 
@@ -52,6 +52,11 @@ with c2:
     categorias_sel = st.multiselect("📂 Filtrar por categoria", options=lista_filtro, default=[])
 
 with c3:
+    # Adicione o filtro de banco aqui
+    lista_bancos = sorted(st.session_state.df_transacoes["banco"].unique().tolist())
+    bancos_sel = st.multiselect("🏦 Banco", options=lista_bancos, default=[])
+
+with c4:
     busca = st.text_input("🔍 Buscar descrição", "").upper()
 
 df_display = st.session_state.df_transacoes.copy()
@@ -62,6 +67,12 @@ if isinstance(periodo, tuple) and len(periodo) == 2:
 
 if categorias_sel:
     df_display = df_display[df_display["categoria"].isin(categorias_sel)]
+
+if busca:
+    df_display = df_display[df_display["descricao"].str.contains(busca, na=False)]
+
+if bancos_sel:
+    df_display = df_display[df_display["banco"].isin(bancos_sel)]
 
 if busca:
     df_display = df_display[df_display["descricao"].str.contains(busca, na=False)]
