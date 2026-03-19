@@ -18,7 +18,7 @@ def aplicar_inteligencia_json(df):
         )
     return df_copy
 
-st.title("📊 Gerenciar Transações")
+st.title("📑 Gerenciamento de Transações")
 
 # --- 1. CARREGAMENTO DOS DADOS ---
 if "df_transacoes" not in st.session_state:

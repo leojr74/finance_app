@@ -7,7 +7,7 @@ from categorizer import load_categories, find_category
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Inclusão Manual", layout="wide")
 
-st.title("➕ Inclusão Manual")
+st.title("✍️ Inclusão Manual")
 st.markdown("Registre gastos em dinheiro, Pix ou outras transações manuais.")
 
 # --- 1. CARREGAMENTO DE OPÇÕES (BANCOS E CATEGORIAS) ---
