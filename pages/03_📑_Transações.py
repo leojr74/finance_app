@@ -3,6 +3,9 @@ import pandas as pd
 from database import carregar_transacoes
 from categorizer import load_categories, add_rule, clean_description, find_category
 from services.transaction_service import save_all_changes
+from ui import apply_global_style
+
+apply_global_style()
 
 # --- CONFIGURAÇÃO DE INTERFACE ---
 st.set_page_config(page_title="Gerenciar Transações", layout="wide")
@@ -103,12 +106,15 @@ df_para_editar = df_para_editar[cols]
 df_editado_raw = st.data_editor(
     df_para_editar,
     key="editor_v32", 
-    use_container_width=True,
+    width='stretch',
     num_rows="dynamic",
     column_config={
         "id": None, 
-        "SEL": st.column_config.CheckboxColumn("S", help="Marcar"),
+        "SEL": st.column_config.CheckboxColumn("Sel", help="Marcar"),
         "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+        # --- LINHA ADICIONADA ABAIXO ---
+        "descricao": st.column_config.TextColumn("Descrição"), 
+        # ------------------------------
         "categoria": st.column_config.SelectboxColumn("Categoria", options=opcoes_dropdown),
         "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f"),
         "banco": st.column_config.TextColumn("Banco", disabled=True),

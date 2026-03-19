@@ -36,33 +36,46 @@ PARSERS = {
 
 
 def reconstruir_data(data_raw, data_inicio, data_fim, descricao=""):
-
     try:
-        dia, mes = map(int, data_raw.split("/"))
+        # 1. Pega o que o banco disse (Ex: "23/02")
+        dia, mes_pdf = map(int, data_raw.split("/"))
     except:
         return None
 
-    # tentativa 1: ano da data_inicio
+    # --- TESTE DE ANO ---
+    
+    # Tentativa A: Assumir que é o ano do início da fatura
     try:
-        data = datetime.date(data_inicio.year, mes, dia)
-    except:
-        return None
+        data_teste_a = datetime.date(data_inicio.year, mes_pdf, dia)
+        if data_inicio <= data_teste_a <= data_fim:
+            return data_teste_a
+    except ValueError:
+        pass
 
-    # se ficou dentro do período → ok
-    if data_inicio <= data <= data_fim:
-        return data
-
-    # tentativa 2: usar mês da data_fim (último mês possível)
+    # Tentativa B: Assumir que é o ano do fim da fatura (Importante para virada de ano)
     try:
-        data = datetime.date(data_fim.year, mes, dia)
-    except:
-        return None
+        data_teste_b = datetime.date(data_fim.year, mes_pdf, dia)
+        if data_inicio <= data_teste_b <= data_fim:
+            return data_teste_b
+    except ValueError:
+        pass
 
-    # se ainda estiver fora, realocar para o último mês da fatura
+    # --- CASO DE SEGURANÇA (O seu erro específico) ---
+    # Se o dia/mês do PDF (Ex: 23/03) NÃO cabe no período (19/02 a 18/03)
+    # mas o dia (23) sugere que deveria estar no mês de início (Fevereiro):
+    
+    if data_inicio.day <= dia <= 31:
+        # Forçamos para o mês de início
+        try:
+            return datetime.date(data_inicio.year, data_inicio.month, dia)
+        except: 
+            return data_inicio
+            
+    # Se o dia for pequeno (Ex: dia 05), forçamos para o mês de fim
     try:
         return datetime.date(data_fim.year, data_fim.month, dia)
     except:
-        return None
+        return data_fim
 
 
 def normalizar_transacoes(transactions, data_inicio, data_fim):
@@ -73,7 +86,7 @@ def normalizar_transacoes(transactions, data_inicio, data_fim):
     for t in transactions:
 
         data_raw = t.get("data")
-        desc = (t.get("descricao") or "").strip()
+        desc = (t.get("descricao") or "").strip().upper()
         valor = t.get("valor")
 
         if not data_raw or not desc:
@@ -86,10 +99,7 @@ def normalizar_transacoes(transactions, data_inicio, data_fim):
 
         data_final = reconstruir_data(data_raw, data_inicio, data_fim, desc)
 
-        print(
-            f"[DATA DEBUG] raw={data_raw} | inicio={data_inicio} | fim={data_fim} | reconstruida={data_final} | desc={desc[:40]}"
-        )
-
+        
         if not data_final:
             continue
 

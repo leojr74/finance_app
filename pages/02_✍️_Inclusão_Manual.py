@@ -3,6 +3,9 @@ import sqlite3
 import pandas as pd
 from datetime import date
 from categorizer import load_categories, find_category
+from ui import apply_global_style
+
+apply_global_style()
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Inclusão Manual", layout="wide")
@@ -58,7 +61,7 @@ with st.container(border=True):
         with col2:
             desc_ins = st.text_input("Descrição (Ex: Padaria da Esquina)").upper().strip()
             
-            # Predição de categoria baseada na descrição (ajuda na UX)
+            # 1. PROTEÇÃO: Só tenta buscar categoria se houver texto
             cat_sugerida = find_category(desc_ins, rules) if desc_ins else "Sem categoria"
             
             # Garante que a sugerida esteja na lista
@@ -66,10 +69,16 @@ with st.container(border=True):
                 lista_categorias.append(cat_sugerida)
                 lista_categorias.sort()
 
+            # 2. PROTEÇÃO: Cálculo de índice seguro para evitar o erro de milissegundos
+            try:
+                index_atual = lista_categorias.index(cat_sugerida)
+            except (ValueError, KeyError):
+                index_atual = 0 # Caso a categoria suma da lista por um instante, volta ao início
+
             categoria_ins = st.selectbox(
                 "Categoria", 
                 options=lista_categorias, 
-                index=lista_categorias.index(cat_sugerida) if cat_sugerida in lista_categorias else 0
+                index=index_atual # Usa o índice seguro calculado acima
             )
 
         submit = st.form_submit_button("💾 Salvar Transação", type="primary")
@@ -117,8 +126,10 @@ if submit:
 # --- 5. VISUALIZAÇÃO DOS ÚLTIMOS LANÇAMENTOS ---
 st.write("---")
 st.subheader("📋 Últimos Lançamentos Manuais")
+
 try:
     conn = sqlite3.connect("transacoes.db")
+    # Nota: Verifique se no seu INSERT você está usando 'MANUAL_ENTRY' ou 'MANUAL'
     df_recent = pd.read_sql_query("""
         SELECT data, descricao, valor, categoria, banco 
         FROM transacoes 
@@ -128,10 +139,23 @@ try:
     conn.close()
     
     if not df_recent.empty:
-        # Formatação visual para a tabela
-        df_recent["data"] = pd.to_datetime(df_recent["data"]).dt.strftime("%d/%m/%Y")
-        st.dataframe(df_recent, use_container_width=True, hide_index=True)
+        # Garantimos que a data seja tratada como objeto de data para o formatador do Streamlit
+        df_recent["data"] = pd.to_datetime(df_recent["data"])
+        
+        st.dataframe(
+            df_recent, 
+            width='stretch', 
+            hide_index=True,
+            column_config={
+                "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                "descricao": "Descrição",  # Ajuste do cabeçalho
+                "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f"),
+                "categoria": "Categoria",
+                "banco": "Banco/Cartão"
+            }
+        )
     else:
         st.info("Nenhuma transação manual encontrada até o momento.")
-except:
+except Exception as e:
+    # Mostramos o aviso, mas sem travar o app
     st.warning("Não foi possível carregar o histórico recente.")

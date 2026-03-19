@@ -204,3 +204,60 @@ def atualizar_categorias(df):
     conn.close()
 
     return atualizadas
+
+# -------- ORÇAMENTOS --------
+
+def criar_tabela_orcamentos():
+    conn = conectar()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS orcamentos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            categoria TEXT,
+            valor REAL,
+            mes INTEGER,
+            ano INTEGER
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def salvar_orcamento(categoria, valor, mes, ano):
+    conn = conectar()
+    cursor = conn.cursor()
+
+    # remove antigo (evita duplicidade)
+    cursor.execute("""
+        DELETE FROM orcamentos
+        WHERE categoria = ? AND mes = ? AND ano = ?
+    """, (categoria, mes, ano))
+
+    cursor.execute("""
+        INSERT INTO orcamentos (categoria, valor, mes, ano)
+        VALUES (?, ?, ?, ?)
+    """, (categoria, valor, mes, ano))
+
+    conn.commit()
+    conn.close()
+
+
+def carregar_orcamentos(mes, ano):
+    conn = conectar()
+
+    try:
+        df = pd.read_sql_query("""
+            SELECT categoria, valor
+            FROM orcamentos
+            WHERE mes = ? AND ano = ?
+        """, conn, params=(mes, ano))
+    except:
+        # se tabela não existir ainda
+        df = pd.DataFrame(columns=["categoria", "valor"])
+
+    finally:
+        conn.close()
+
+    return df

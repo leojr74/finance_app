@@ -1,4 +1,7 @@
 import streamlit as st
+from ui import apply_global_style
+
+apply_global_style()
 
 # Configuração da página (deve ser a primeira linha de comando Streamlit)
 st.set_page_config(

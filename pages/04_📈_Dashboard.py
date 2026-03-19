@@ -2,6 +2,22 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 from database import carregar_transacoes
+from ui import apply_global_style
+
+apply_global_style()
+
+CATEGORIAS_FIXAS = [
+    "Alimentação",
+    "Assinaturas",
+    "Moradia",
+    "Saúde",
+    "Supermercado",
+    "Transporte",
+    "Viagem"
+]
+
+def formatar(valor):
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 # Configuração da página
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
@@ -10,10 +26,18 @@ st.title("📈 Dashboard Financeiro")
 
 # 1. CARREGAMENTO DOS DADOS
 df = carregar_transacoes()
+df = df[df["categoria"] != "Descontos"]
+
 
 if df is None or df.empty:
     st.warning("⚠️ Nenhuma transação encontrada no banco de dados.")
     st.stop()
+
+df_fixos = df[df["categoria"].isin(CATEGORIAS_FIXAS)]
+df_variaveis = df[~df["categoria"].isin(CATEGORIAS_FIXAS)]
+
+fixo_total = df_fixos["valor"].sum()
+variavel_total = df_variaveis["valor"].sum()
 
 # Garantir tipo datetime para os cálculos e filtros
 df["data"] = pd.to_datetime(df["data"])
@@ -86,7 +110,7 @@ with col_esq:
         color="categoria:N", 
         tooltip=["categoria", alt.Tooltip("valor", format=",.2f")]
     ).properties(height=350)
-    st.altair_chart(pizza, use_container_width=True)
+    st.altair_chart(pizza, width='stretch')
 
 with col_dir:
     st.subheader("📊 Média Mensal por Categoria")
@@ -99,7 +123,7 @@ with col_dir:
         color=alt.Color("categoria:N", legend=None),
         tooltip=[alt.Tooltip("categoria"), alt.Tooltip("media_mensal", format=",.2f")]
     ).properties(height=350)
-    st.altair_chart(chart_media, use_container_width=True)
+    st.altair_chart(chart_media, width='stretch')
 
 st.write("---")
 st.subheader("📅 Evolução dos Gastos Totais (Mês a Mês)")
@@ -113,4 +137,12 @@ barras_mes = alt.Chart(resumo_mes).mark_bar(color="#0068c9").encode(
     tooltip=[alt.Tooltip("mes", title="Mês"), alt.Tooltip("valor", format=",.2f", title="Total")]
 ).properties(height=300)
 
-st.altair_chart(barras_mes, use_container_width=True)
+st.altair_chart(barras_mes, width='stretch')
+
+st.divider()
+st.subheader("📊 Custos Fixos vs Variáveis")
+
+col1, col2 = st.columns(2)
+
+col1.metric("🏠 Fixos", formatar(fixo_total))
+col2.metric("📉 Variáveis", formatar(variavel_total))
