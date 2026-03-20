@@ -9,13 +9,6 @@ from ui import apply_global_style
 from database import criar_tabela, get_categorias_completas, get_gastos_fixos, salvar_config_categoria
 from categorizer import load_categories 
 
-# Configuração da página (DEVE ser o primeiro comando Streamlit)
-st.set_page_config(
-    page_title="Finanças Pessoais",
-    page_icon="💰",
-    layout="wide"
-)
-
 apply_global_style()
 
 # Garante que a estrutura do banco existe
