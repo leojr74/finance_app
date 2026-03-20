@@ -95,6 +95,55 @@ if st.button("💾 Salvar Orçamento"):
     st.success("✅ Salvo!")
     st.rerun()
 
+# Unificação dos dados
+df_final = pd.merge(gastos_reais, orc_salvos, on="categoria", how="outer")
+df_final = pd.merge(df_final, media_hist, on="categoria", how="left")
+df_final = df_final.fillna(0)
+
+# --------------------------------------------------
+# 4. RESUMO POR TIPO (FIXO vs VARIÁVEL) - NOVO BLOCO
+# --------------------------------------------------
+st.divider()
+st.subheader("📋 Previsão por Tipo de Custo")
+
+# Criamos uma coluna temporária para identificar o tipo baseado no que vem do banco (CATEGORIAS_FIXAS)
+df_final['tipo'] = df_final['categoria'].apply(lambda x: 'Fixo' if x in CATEGORIAS_FIXAS else 'Variável')
+
+# Agrupamos os valores orçados e reais por tipo
+resumo_tipo = df_final.groupby('tipo').agg({
+    'valor_orc': 'sum',
+    'valor_real': 'sum'
+}).reset_index()
+
+col_f, col_v = st.columns(2)
+
+with col_f:
+    # Filtra os dados de Fixos
+    dados_fixo = resumo_tipo[resumo_tipo['tipo'] == 'Fixo']
+    v_orc_f = dados_fixo['valor_orc'].iloc[0] if not dados_fixo.empty else 0
+    v_real_f = dados_fixo['valor_real'].iloc[0] if not dados_fixo.empty else 0
+    
+    with st.container(border=True):
+        st.markdown("**📌 Custos Fixos**")
+        st.metric("Orçado", f"R$ {v_orc_f:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        st.write(f"Realizado: R$ {v_real_f:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        # Barra de progresso do orçamento fixo
+        prog_f = min(v_real_f / v_orc_f, 1.0) if v_orc_f > 0 else 0
+        st.progress(prog_f, text=f"{int(prog_f*100)}% consumido")
+
+with col_v:
+    # Filtra os dados de Variáveis
+    dados_var = resumo_tipo[resumo_tipo['tipo'] == 'Variável']
+    v_orc_v = dados_var['valor_orc'].iloc[0] if not dados_var.empty else 0
+    v_real_v = dados_var['valor_real'].iloc[0] if not dados_var.empty else 0
+    
+    with st.container(border=True):
+        st.markdown("**💸 Custos Variáveis**")
+        st.metric("Orçado", f"R$ {v_orc_v:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        st.write(f"Realizado: R$ {v_real_v:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+        # Barra de progresso do orçamento variável
+        prog_v = min(v_real_v / v_orc_v, 1.0) if v_orc_v > 0 else 0
+        st.progress(prog_v, text=f"{int(prog_v*100)}% consumido")
 # --------------------------------------------------
 # Comparação visual (Orçado vs Realizado)
 # --------------------------------------------------
