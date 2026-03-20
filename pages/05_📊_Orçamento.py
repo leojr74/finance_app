@@ -87,7 +87,7 @@ df_edit = st.data_editor(
         "valor_real": st.column_config.NumberColumn("Gasto Realizado", format="R$ %.2f", disabled=True),
     },
     hide_index=True,
-    width="stretch"
+    use_container_width=True
 )
 
 if st.button("💾 Salvar Orçamento"):
