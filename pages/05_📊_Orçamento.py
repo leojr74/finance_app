@@ -1,309 +1,167 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from ui import apply_global_style
-
-
-
+import altair as alt
 from database import (
     carregar_transacoes,
-    criar_tabela_orcamentos,
+    criar_tabela,
     salvar_orcamento,
+    get_gastos_fixos,
     carregar_orcamentos
 )
+from ui import apply_global_style
 
 st.set_page_config(page_title="Orçamento", layout="wide")
 apply_global_style()
 
 st.title("📊 Planejamento de Orçamento")
 
-# garante que a tabela existe
-criar_tabela_orcamentos()
+# Garante a estrutura do banco
+criar_tabela()
 
-CATEGORIAS_FIXAS = [
-    "Alimentação",
-    "Assinaturas",
-    "Moradia",
-    "Saúde",
-    "Supermercado",
-    "Transporte",
-    "Viagem"
-]
+# Puxa categorias configuradas na Home (Fixas)
+CATEGORIAS_FIXAS = get_gastos_fixos()
 
 # -----------------------------
-# Seleção de período
+# 1. Seleção de Período
 # -----------------------------
-
 col1, col2 = st.columns(2)
-
 with col1:
     mes = st.selectbox("Mês", list(range(1, 13)), index=date.today().month - 1)
-
 with col2:
     ano = st.number_input("Ano", value=date.today().year)
 
+# Botão de cópia (Lógica mantida)
 if st.button("📅 Copiar orçamento do mês anterior"):
-
     mes_ant = mes - 1 if mes > 1 else 12
     ano_ant = ano if mes > 1 else ano - 1
-
     df_ant = carregar_orcamentos(mes_ant, ano_ant)
-
-    if df_ant.empty:
-        st.warning("Nenhum orçamento encontrado no mês anterior")
-    else:
+    if not df_ant.empty:
         for _, row in df_ant.iterrows():
-            salvar_orcamento(
-                row["categoria"],
-                row["valor"],
-                mes,
-                ano
-            )
-
-        st.success("Orçamento copiado com sucesso!")
+            salvar_orcamento(row["categoria"], row["valor"], mes, ano)
+        st.success("Copiado com sucesso!")
         st.rerun()
 
 # -----------------------------
-# Carregar transações
+# 2. Processamento de Dados (Sem Duplicidade)
 # -----------------------------
-df = carregar_transacoes()
-df = df[df["categoria"] != "Descontos"]
+df_trans = carregar_transacoes()
+df_trans = df_trans[df_trans["categoria"] != "Descontos"]
 
-if df is None or df.empty:
-    st.warning("⚠️ Nenhuma transação encontrada.")
-    st.stop()
+# Cálculo da Média Histórica (Para sugestão)
+if not df_trans.empty:
+    df_trans["data"] = pd.to_datetime(df_trans["data"])
+    df_trans["mes_ref"] = df_trans["data"].dt.to_period("M")
+    media_hist = df_trans.groupby(["categoria", "mes_ref"])["valor"].sum().reset_index()
+    media_hist = media_hist.groupby("categoria")["valor"].mean().reset_index().rename(columns={"valor": "media"})
+else:
+    media_hist = pd.DataFrame(columns=["categoria", "media"])
 
-df["data"] = pd.to_datetime(df["data"])
+# Gastos Reais do Mês Selecionado
+df_mes = df_trans[(df_trans["data"].dt.month == mes) & (df_trans["data"].dt.year == ano)]
+gastos_reais = df_mes.groupby("categoria")["valor"].sum().reset_index().rename(columns={"valor": "valor_real"})
 
-df_mes = df[
-    (df["data"].dt.month == mes) &
-    (df["data"].dt.year == ano)
-]
+# Orçamentos salvos no banco
+orc_salvos = carregar_orcamentos(mes, ano).rename(columns={"valor": "valor_orc"})
 
-df["mes"] = df["data"].dt.to_period("M")
-media_categoria = df.groupby(["categoria", "mes"])["valor"].sum().reset_index()
-media_categoria = media_categoria.groupby("categoria")["valor"].mean().reset_index()
-media_categoria.rename(columns={"valor": "media"}, inplace=True)
-media_categoria["media"] = media_categoria["media"].round(2).astype(float)
+# Unificação dos dados (Merge único para evitar duplicidade)
+df_final = pd.merge(gastos_reais, orc_salvos, on="categoria", how="outer")
+df_final = pd.merge(df_final, media_hist, on="categoria", how="left")
 
-# -----------------------------
-# Gastos reais
-# -----------------------------
-gastos = df_mes.groupby("categoria")["valor"].sum().reset_index()
-
-# -----------------------------
-# Orçamentos salvos
-# -----------------------------
-orc = carregar_orcamentos(mes, ano)
+# Limpeza de nulos e tipos
+df_final = df_final.fillna(0)
+df_final["valor_orc"] = pd.to_numeric(df_final["valor_orc"])
+df_final["valor_real"] = pd.to_numeric(df_final["valor_real"])
 
 # -----------------------------
-# Merge
+# 3. Tabela de Edição
 # -----------------------------
-df_final = pd.merge(
-    gastos,
-    orc,
-    on="categoria",
-    how="outer",
-    suffixes=("_real", "_orc")
-)
-
-# adiciona sugestão automática (média)
-df_final = pd.merge(
-    df_final,
-    media_categoria,
-    on="categoria",
-    how="left"
-)
-
-df_final["valor_orc"] = pd.to_numeric(df_final["valor_orc"], errors="coerce")
-df_final["valor_real"] = pd.to_numeric(df_final["valor_real"], errors="coerce")
-
-df_final = df_final.assign(
-    valor_orc=lambda x: x["valor_orc"].where(x["valor_orc"].notna(), 0),
-    valor_real=lambda x: x["valor_real"].where(x["valor_real"].notna(), 0),
-)
-
-df_final["media"] = pd.to_numeric(df_final["media"], errors="coerce")
-
-# ==============================
-# TABELA PRINCIPAL
-# ==============================
-
-st.subheader("📊 Orçamento por Categoria")
-
-# garante ordem das colunas
-df_final = df_final[["categoria", "media", "valor_orc", "valor_real"]]
-
+st.subheader("✏️ Ajustar Metas")
 df_edit = st.data_editor(
-    df_final,
-    width="stretch",
-    hide_index=True,
+    df_final[["categoria", "media", "valor_orc", "valor_real"]],
     column_config={
         "categoria": "Categoria",
-        "media": st.column_config.NumberColumn("Média mensal (R$)", format="%.2f", disabled=True),
-        "valor_orc": st.column_config.NumberColumn("Orçamento (R$)", format="%.2f"),
-        "valor_real": st.column_config.NumberColumn("Gasto (R$)", format="%.2f", disabled=True),
-    }
+        "media": st.column_config.NumberColumn("Média Histórica", format="R$ %.2f", disabled=True),
+        "valor_orc": st.column_config.NumberColumn("Meta Orçada (R$)", format="%.2f", min_value=0.0),
+        "valor_real": st.column_config.NumberColumn("Gasto Realizado", format="R$ %.2f", disabled=True),
+    },
+    hide_index=True,
+    use_container_width=True
 )
 
-# ==============================
-# TOTAIS
-# ==============================
-
-total_media = df_edit["media"].sum()
-total_orc = df_edit["valor_orc"].sum()
-total_real = df_edit["valor_real"].sum()
-
-# ==============================
-# FIXO vs VARIÁVEL
-# ==============================
-
-df_fixos = df_edit[df_edit["categoria"].isin(CATEGORIAS_FIXAS)]
-df_variaveis = df_edit[~df_edit["categoria"].isin(CATEGORIAS_FIXAS)]
-
-fixo_real = df_fixos["valor_real"].sum()
-variavel_real = df_variaveis["valor_real"].sum()
-
-fixo_orc = df_fixos["valor_orc"].sum()
-variavel_orc = df_variaveis["valor_orc"].sum()
-
-# ==============================
-# MÉTRICAS (visual profissional)
-# ==============================
-
-st.divider()
-
-col1, col2, col3 = st.columns(3)
-
-def formatar(valor):
-    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-col1.metric("📊 Média Total", formatar(total_media))
-col2.metric("🎯 Orçamento Total", formatar(total_orc))
-col3.metric("💸 Gasto Total", formatar(total_real))
-
-st.divider()
-st.subheader("📊 Custos Fixos vs Variáveis")
-
-col1, col2 = st.columns(2)
-
-col1.metric("🏠 Fixos (Real)", formatar(fixo_real))
-col1.metric("🎯 Fixos (Orçado)", formatar(fixo_orc))
-
-col2.metric("📉 Variáveis (Real)", formatar(variavel_real))
-col2.metric("🎯 Variáveis (Orçado)", formatar(variavel_orc))
-
-# ==============================
-# SALDO + ALERTA
-# ==============================
-
-saldo = total_orc - total_real
-
-st.write("")
-
-if saldo < 0:
-    st.error(f"🚨 Orçamento estourado! Saldo: {formatar(saldo)}")
-elif saldo < total_orc * 0.2:
-    st.warning(f"⚠️ Atenção! Saldo restante: {formatar(saldo)}")
-else:
-    st.success(f"✅ Orçamento sob controle. Saldo: {formatar(saldo)}")
-
-# -----------------------------
-# Salvar
-# -----------------------------
-if st.button("💾 Salvar orçamento"):
-
+if st.button("💾 Salvar Orçamento"):
     for _, row in df_edit.iterrows():
-
-        categoria = row.get("categoria")
-        valor = row.get("valor_orc")
-
-        # validações
-        if not categoria:
-            continue
-
-        try:
-            valor = float(valor)
-        except:
-            valor = 0
-
-        salvar_orcamento(
-            categoria,
-            valor,
-            mes,
-            ano
-        )
-
-    st.success("✅ Orçamento salvo com sucesso!")
+        salvar_orcamento(row["categoria"], row["valor_orc"], mes, ano)
+    st.success("✅ Salvo!")
     st.rerun()
 
-# -----------------------------
-# Comparação visual
-# -----------------------------
-st.write("---")
-st.subheader("📈 Orçado vs Realizado")
-
-for _, row in df_edit.iterrows():
-
-    categoria = row["categoria"]
-    real = row["valor_real"]
-    orcamento = row["valor_orc"]
-
-    if orcamento == 0:
-        continue
-
-    proporcao = real / orcamento
-
-    if proporcao > 1:
-        emoji = "🔴"
-        status = "Estourado"
-    elif proporcao > 0.8:
-        emoji = "🟠"
-        status = "Atenção"
-    else:
-        emoji = "🟢"
-        status = "Ok"
-
-    st.markdown(f"### {emoji} {categoria} — {status}")
-
-    st.progress(min(proporcao, 1.0))
-
-    st.caption(
-        f"Gasto: R$ {real:,.2f} | Orçamento: R$ {orcamento:,.2f}"
-        .replace(",", "X").replace(".", ",").replace("X", ".")
-    )
-
+# --------------------------------------------------
+# Comparação visual (Orçado vs Realizado)
+# --------------------------------------------------
 import altair as alt
 
 st.divider()
-st.subheader("📊 Orçado vs Real por Categoria")
+st.subheader("🎯 Confronto: Orçado vs Realizado")
 
-df_chart = df_edit.copy()
+if not df_edit.empty:
+    # 1. Preparar os dados (Garantir que são números)
+    df_plot = df_edit.copy()
+    df_plot["valor_real"] = pd.to_numeric(df_plot["valor_real"], errors="coerce").fillna(0)
+    df_plot["valor_orc"] = pd.to_numeric(df_plot["valor_orc"], errors="coerce").fillna(0)
 
-# garante tipos numéricos
-df_chart["valor_real"] = pd.to_numeric(df_chart["valor_real"], errors="coerce")
-df_chart["valor_orc"] = pd.to_numeric(df_chart["valor_orc"], errors="coerce")
+    # 2. Definir a cor da barra de gasto (Vermelho se estourar, Azul se OK)
+    df_plot['cor_status'] = df_plot.apply(
+        lambda x: '#FF4B4B' if x['valor_real'] > x['valor_orc'] else '#1F77B4', axis=1
+    )
 
-# 🔥 transforma manualmente (sem transform_fold)
-df_chart_long = pd.melt(
-    df_chart,
-    id_vars=["categoria"],
-    value_vars=["valor_real", "valor_orc"],
-    var_name="Tipo",
-    value_name="Valor"
-)
+    # 3. Criar o gráfico de sobreposição
+    base = alt.Chart(df_plot).encode(
+        y=alt.Y("categoria:N", title=None, sort="-x")
+    )
 
-# deixa nomes mais bonitos
-df_chart_long["Tipo"] = df_chart_long["Tipo"].map({
-    "valor_real": "Gasto",
-    "valor_orc": "Orçamento"
-})
+    # Camada de Fundo: Orçamento (Barra cinza mais larga)
+    # stack=None impede que o Altair some os valores
+    bar_orc = base.mark_bar(size=24, color="#E6EAF1", cornerRadiusEnd=2).encode(
+        x=alt.X("valor_orc:Q", title="Valor (R$)", stack=None)
+    )
 
-chart = alt.Chart(df_chart_long).mark_bar().encode(
-    x=alt.X('categoria:N', sort='-y', title="Categoria"),
-    y=alt.Y('Valor:Q', title="Valor (R$)"),
-    color=alt.Color('Tipo:N', title="Tipo"),
-    tooltip=['categoria:N', 'Tipo:N', 'Valor:Q']
-).properties(height=400)
+    # Camada de Frente: Gasto Real (Barra colorida mais fina)
+    bar_real = base.mark_bar(size=14, cornerRadiusEnd=2).encode(
+        x=alt.X("valor_real:Q", stack=None),
+        color=alt.Color('cor_status:N', scale=None),
+        tooltip=[
+            alt.Tooltip("categoria", title="Categoria"),
+            alt.Tooltip("valor_orc", title="Meta Orçada", format=",.2f"),
+            alt.Tooltip("valor_real", title="Gasto Real", format=",.2f")
+        ]
+    )
 
-st.altair_chart(chart, width="stretch")
+    # Camada de Texto: Alerta de Estouro
+    text_alerta = base.mark_text(align='left', dx=10, color='#FF4B4B', fontWeight='bold').encode(
+        x=alt.X("max(valor_real, valor_orc):Q"),
+        text=alt.condition(
+            alt.datum.valor_real > alt.datum.valor_orc,
+            alt.value("⚠️ ESTOUROU"),
+            alt.value("")
+        )
+    )
+
+    # Juntar as camadas
+    chart_final = alt.layer(bar_orc, bar_real, text_alerta).properties(height=alt.Step(40))
+
+    st.altair_chart(chart_final, use_container_width=True)
+
+# -----------------------------
+# 5. Métricas Finais
+# -----------------------------
+st.divider()
+total_orc = df_edit["valor_orc"].sum()
+total_real = df_edit["valor_real"].sum()
+saldo = total_orc - total_real
+
+c1, c2, c3 = st.columns(3)
+def fmt(v): return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+c1.metric("🎯 Total Orçado", fmt(total_orc))
+c2.metric("💸 Total Gasto", fmt(total_real), delta=fmt(-saldo), delta_color="inverse")
+c3.metric("💰 Saldo", fmt(saldo), delta="Meta Mensal")

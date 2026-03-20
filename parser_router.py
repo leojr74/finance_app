@@ -78,16 +78,16 @@ def reconstruir_data(data_raw, data_inicio, data_fim, descricao=""):
         return data_fim
 
 
-def normalizar_transacoes(transactions, data_inicio, data_fim):
+def normalizar_transacoes(raw_transactions, data_inicio, data_fim):
 
     categorias = load_categories()
     normalizadas = []
 
-    for t in transactions:
+    for t in raw_transactions:
 
+        desc = t.get("descricao", "SEM DESCRICAO")
+        valor = t.get("valor", 0.0)
         data_raw = t.get("data")
-        desc = (t.get("descricao") or "").strip().upper()
-        valor = t.get("valor")
 
         if not data_raw or not desc:
             continue
@@ -103,16 +103,18 @@ def normalizar_transacoes(transactions, data_inicio, data_fim):
         if not data_final:
             continue
 
-        categoria = t.get("categoria")
-
-        if not categoria or categoria == "Sem categoria":
-            categoria = find_category(desc, categorias) or "Sem categoria"
+        categoria_inteligente = find_category(desc, categorias)
+        
+        if not categoria_inteligente:
+            categoria_final = "Sem categoria"
+        else:
+            categoria_final = categoria_inteligente
 
         normalizadas.append({
             "data": data_final.strftime("%d/%m/%Y"),
             "descricao": desc,
             "valor": valor,
-            "categoria": categoria
+            "categoria": categoria_final # Agora garantimos que vem do seu JSON
         })
 
     return normalizadas
@@ -130,18 +132,10 @@ def extract_transactions_auto(pdf_path, data_inicio, data_fim):
     if not parser:
         raise ValueError(f"Parser não encontrado para banco: {bank}")
     
-    print(f"[ROUTER] banco detectado: {bank}")
-    print(f"[ROUTER] periodo fatura: {data_inicio} -> {data_fim}")
-
     mes_fatura = data_fim.month
     ano_fatura = data_fim.year
 
     raw_transactions = parser(pdf_path, mes_fatura, ano_fatura)
-
-    print("\n[RAW TRANSACTIONS SAMPLE]")
-    for t in raw_transactions[:10]:
-        print(t)
-    print()
 
     transactions = normalizar_transacoes(
         raw_transactions,

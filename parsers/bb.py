@@ -1,6 +1,5 @@
 import pdfplumber
 import re
-from categorizer import load_categories, find_category
 
 def ajustar_data_compra(dia, mes_fatura, ano_fatura, inicio_ciclo=24):
     """Ajustar data da compra ao mês da fatura"""
@@ -17,15 +16,7 @@ def ajustar_data_compra(dia, mes_fatura, ano_fatura, inicio_ciclo=24):
 
 def extract_transactions(pdf_path, mes_fatura, ano_fatura):
     """
-    Parser para Banco do Brasil - extrai transações do cartão
-    
-    Estrutura do PDF:
-    - SALDO FATURA ANTERIOR (IGNORAR - é do mês anterior)
-    - Pagamentos/Créditos (incluir - são movimentações)
-    - Outros lançamentos (incluir - despesas reais)
-    - Compras parceladas (incluir - despesas parceladas)
-    
-    Padrão: DD/MM + DESCRIÇÃO + PAÍS + R$ VALOR
+    Parser para Banco do Brasil - Extração simplificada (Limpa)
     """
     transactions = []
     try:
@@ -35,22 +26,14 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
                 page_text = page.extract_text() or ""
                 text_all += page_text + "\n"
         
-        pass  # removed debug print
-        print(f"BANCO DO BRASIL - DEBUG: Operações extraídas")
-        print(f"{'='*120}")
-        
-        # Procurar seção "Lançamentos nesta fatura"
+        # Localizar a seção de lançamentos
         lancamentos_pos = text_all.find("Lançamentos nesta fatura")
         if lancamentos_pos < 0:
             return []
         
         text_section = text_all[lancamentos_pos:]
         
-        seen = {}
-        extracted_count = 0
-        
         # Padrão: DD/MM + descrição + país (BR/US) + R$ valor
-        # Descrição pode conter números, "-", parenteses, etc
         pattern = re.compile(
             r'(\d{2}/\d{2})\s+(.+?)\s+(BR|US)\s+R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})',
             re.MULTILINE
@@ -58,65 +41,40 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
         
         for match in pattern.finditer(text_section):
             date = match.group(1)
-            desc = match.group(2).strip()
-            country = match.group(3)
+            desc = match.group(2).strip().upper()
             value_str = match.group(4)
             
-            # Filtros básicos
-            if not desc or len(desc) < 1:
+            # Filtros de títulos e linhas irrelevantes
+            desc_upper = desc.upper()
+            if any(desc_upper.startswith(x) for x in [
+                'SALDO FATURA ANTERIOR', 'PAGAMENTOS', 'OUTROS LANÇAMENTOS', 
+                'COMPRAS PARCELADAS', 'SUBTOTAL', 'TOTAL DA FATURA'
+            ]):
                 continue
+            
             if not re.search(r'[A-Za-z0-9]', desc):
                 continue
             
-            # Ignorar linhas que são títulos
-            if desc.upper().startswith('SALDO FATURA ANTERIOR') or \
-               desc.upper().startswith('PAGAMENTOS') or \
-               desc.upper().startswith('OUTROS LANÇAMENTOS') or \
-               desc.upper().startswith('COMPRAS PARCELADAS') or \
-               desc.upper().startswith('SUBTOTAL') or \
-               desc.upper().startswith('TOTAL DA FATURA'):
-                continue
-            
             try:
+                # Conversão numérica
                 value = float(value_str.replace(".", "").replace(",", "."))
+                
+                # Tratar créditos (pagamentos ou estornos no BB começam com "-")
+                if desc.startswith('-') or value_str.startswith('-'):
+                    value = abs(value) * -1
+                    
             except ValueError:
                 continue
             
-            # Se descrição começa com "-", é crédito (valor negativo já)
-            # Pagamentos já vêm como negativo no PDF (PGTO. COBRANCA R$ -120,00)
-            if desc.startswith('-') or value_str.startswith('-'):
-                value = abs(value) * -1
+            # Monta o dicionário sem tentar categorizar aqui
+            transactions.append({
+                "data": date,
+                "descricao": desc,
+                "valor": value,
+                "categoria": "Sem categoria" # O Router resolverá isso via JSON
+            })
             
-            desc_normalized = ' '.join(desc.split())
-            key = (date, desc_normalized, value)
-            
-            if key not in seen:
-                seen[key] = True
-                extracted_count += 1
-                pass  # removed transaction print
-                
-                categories = load_categories()
-                category = find_category(desc, categories)
-                if not category:
-                    category = "Sem categoria"
-                
-                dia = int(date.split("/")[0])
-                data_corrigida = date
-                
-                transactions.append({
-                    "data": date,
-                    "descricao": desc.strip(),
-                    "valor": value,
-                    "categoria": category
-                })
-        
-        pass  # removed debug print
-        pass  # removed total print
-        print(f"{'='*120}\n")
-    
     except Exception as e:
-        print(f"Erro: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Erro no parser BB: {e}")
     
     return transactions

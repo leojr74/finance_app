@@ -1,148 +1,80 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from database import carregar_transacoes
+from database import carregar_transacoes, get_gastos_fixos
 from ui import apply_global_style
 
 apply_global_style()
 
-CATEGORIAS_FIXAS = [
-    "Alimentação",
-    "Assinaturas",
-    "Moradia",
-    "Saúde",
-    "Supermercado",
-    "Transporte",
-    "Viagem"
-]
-
 def formatar(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-# Configuração da página
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
-
 st.title("📈 Dashboard Financeiro")
 
-# 1. CARREGAMENTO DOS DADOS
+# 1. CARREGAMENTO E LIMPEZA
 df = carregar_transacoes()
-df = df[df["categoria"] != "Descontos"]
-
-
 if df is None or df.empty:
-    st.warning("⚠️ Nenhuma transação encontrada no banco de dados.")
+    st.warning("⚠️ Nenhuma transação encontrada.")
     st.stop()
 
-df_fixos = df[df["categoria"].isin(CATEGORIAS_FIXAS)]
-df_variaveis = df[~df["categoria"].isin(CATEGORIAS_FIXAS)]
-
-fixo_total = df_fixos["valor"].sum()
-variavel_total = df_variaveis["valor"].sum()
-
-# Garantir tipo datetime para os cálculos e filtros
+df = df[df["categoria"] != "Descontos"]
 df["data"] = pd.to_datetime(df["data"])
 
-# --- ÁREA DE FILTROS (3 COLUNAS) ---
+# 2. FILTROS
 st.write("---")
 c1, c2, c3 = st.columns([1, 1, 1])
-
 with c1:
-    # Datas limites baseadas no que existe no banco
-    datas_limite = (df["data"].min().date(), df["data"].max().date())
-    periodo = st.date_input("📅 Filtrar por período", value=datas_limite, format="DD/MM/YYYY")
-
-with c2:
-    # Lista de categorias únicas
-    lista_filtro = sorted(df["categoria"].unique().tolist())
-    if "Sem categoria" not in lista_filtro:
-        lista_filtro.append("Sem categoria")
-    
-    # Default vazio [] para manter o visual limpo como na página de transações
-    categorias_sel = st.multiselect("📂 Filtrar por categoria", options=lista_filtro, default=[])
-
-with c3:
-    # Lista de bancos/cartões (já padronizados pelo bank_detector e importação)
-    lista_bancos = sorted(df["banco"].unique().tolist())
-    bancos_sel = st.multiselect("🏦 Filtrar por Banco/Cartão", options=lista_bancos, default=[])
-
-# --- LÓGICA DE FILTRAGEM ---
-df_filtrado = df.copy()
+    min_d, max_d = df["data"].min().date(), df["data"].max().date()
+    periodo = st.date_input("Período", value=(min_d, max_d), min_value=min_d, max_value=max_d)
 
 if isinstance(periodo, tuple) and len(periodo) == 2:
-    start_date, end_date = periodo
-    df_filtrado = df_filtrado[(df_filtrado["data"].dt.date >= start_date) & (df_filtrado["data"].dt.date <= end_date)]
+    df_filtrado = df[(df["data"].dt.date >= periodo[0]) & (df["data"].dt.date <= periodo[1])]
+else:
+    df_filtrado = df
 
-if categorias_sel:
-    df_filtrado = df_filtrado[df_filtrado["categoria"].isin(categorias_sel)]
-
-if bancos_sel:
-    df_filtrado = df_filtrado[df_filtrado["banco"].isin(bancos_sel)]
-
-# --- VALIDAÇÃO ---
-if df_filtrado.empty:
-    st.info("🔎 Nenhum dado encontrado para os filtros selecionados.")
-    st.stop()
-
-# --- CÁLCULOS DE MÉTRICAS ---
-total_gasto = df_filtrado["valor"].sum()
-# Conta quantos meses únicos existem no recorte filtrado
-n_meses = len(df_filtrado["data"].dt.to_period("M").unique())
-media_geral = total_gasto / n_meses if n_meses > 0 else total_gasto
-
-# --- EXIBIÇÃO DE MÉTRICAS ---
-st.write("---")
+# 3. MÉTRICAS
+CATEGORIAS_FIXAS = get_gastos_fixos()
 m1, m2, m3 = st.columns(3)
-# Formatação de moeda padrão brasileiro
-m1.metric("Total Gasto", f"R$ {total_gasto:,.2f}".replace(",", "X").replace(".", ",").replace("X","."))
-m2.metric("Média Mensal Geral", f"R$ {media_geral:,.2f}".replace(",", "X").replace(".", ",").replace("X","."))
-m3.metric("Meses Analisados", n_meses)
+total = df_filtrado["valor"].sum()
+fixo = df_filtrado[df_filtrado["categoria"].isin(CATEGORIAS_FIXAS)]["valor"].sum()
+var = total - fixo
 
+m1.metric("Gasto Total", formatar(total))
+m2.metric("Custos Fixos", formatar(fixo))
+m3.metric("Custos Variáveis", formatar(var))
+
+# --- 4. GRÁFICOS (A PARTE QUE ESTAVA "ZOADA") ---
 st.write("---")
-
-# --- GRÁFICOS ---
 col_esq, col_dir = st.columns(2)
 
 with col_esq:
     st.subheader("🍕 Distribuição por Categoria")
-    resumo_pizza = df_filtrado.groupby("categoria")["valor"].sum().reset_index()
-    pizza = alt.Chart(resumo_pizza).mark_arc(innerRadius=50).encode(
-        theta="valor:Q", 
-        color="categoria:N", 
-        tooltip=["categoria", alt.Tooltip("valor", format=",.2f")]
-    ).properties(height=350)
-    st.altair_chart(pizza, width='stretch')
+    
+    # 🔥 A CORREÇÃO: Agrupar por categoria e somar os valores antes de mandar para o gráfico
+    df_pizza = df_filtrado.groupby("categoria")["valor"].sum().reset_index()
+    
+    pizza = alt.Chart(df_pizza).mark_arc(innerRadius=50).encode(
+        theta=alt.Theta(field="valor", type="quantitative"),
+        color=alt.Color(field="categoria", type="nominal", legend=alt.Legend(title="Categorias")),
+        tooltip=[
+            alt.Tooltip("categoria", title="Categoria"),
+            alt.Tooltip("valor", title="Total (R$)", format=",.2f")
+        ]
+    ).properties(height=400)
+    
+    st.altair_chart(pizza, use_container_width=True)
 
 with col_dir:
-    st.subheader("📊 Média Mensal por Categoria")
-    resumo_categoria = df_filtrado.groupby("categoria")["valor"].sum().reset_index()
-    resumo_categoria["media_mensal"] = resumo_categoria["valor"] / n_meses
+    st.subheader("📊 Maiores Gastos")
+    # Agrupa também para o gráfico de barras para evitar repetições
+    df_barras = df_filtrado.groupby("categoria")["valor"].sum().reset_index().sort_values("valor", ascending=False)
     
-    chart_media = alt.Chart(resumo_categoria).mark_bar().encode(
-        x=alt.X("media_mensal:Q", title="Média Mensal (R$)"),
+    barras = alt.Chart(df_barras).mark_bar().encode(
+        x=alt.X("valor:Q", title="Total Gasto (R$)"),
         y=alt.Y("categoria:N", sort="-x", title="Categoria"),
         color=alt.Color("categoria:N", legend=None),
-        tooltip=[alt.Tooltip("categoria"), alt.Tooltip("media_mensal", format=",.2f")]
-    ).properties(height=350)
-    st.altair_chart(chart_media, width='stretch')
-
-st.write("---")
-st.subheader("📅 Evolução dos Gastos Totais (Mês a Mês)")
-evolucao = df_filtrado.copy()
-evolucao["mes"] = evolucao["data"].dt.to_period("M").astype(str)
-resumo_mes = evolucao.groupby("mes")["valor"].sum().reset_index()
-
-barras_mes = alt.Chart(resumo_mes).mark_bar(color="#0068c9").encode(
-    x=alt.X("mes:N", title="Mês/Ano"),
-    y=alt.Y("valor:Q", title="Soma das Transações (R$)"),
-    tooltip=[alt.Tooltip("mes", title="Mês"), alt.Tooltip("valor", format=",.2f", title="Total")]
-).properties(height=300)
-
-st.altair_chart(barras_mes, width='stretch')
-
-st.divider()
-st.subheader("📊 Custos Fixos vs Variáveis")
-
-col1, col2 = st.columns(2)
-
-col1.metric("🏠 Fixos", formatar(fixo_total))
-col2.metric("📉 Variáveis", formatar(variavel_total))
+        tooltip=["categoria", alt.Tooltip("valor", format=",.2f")]
+    ).properties(height=400)
+    
+    st.altair_chart(barras, use_container_width=True)

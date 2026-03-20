@@ -16,8 +16,11 @@ def ajustar_data_compra(dia, mes_fatura, ano_fatura, inicio_ciclo=12):
     return f"{dia:02d}/{mes:02d}/{ano}"
 
 def extract_transactions(pdf_path, mes_fatura, ano_fatura):
+    """
+    Parser para Santander - Extração limpa com limpeza de descrição e MAIÚSCULAS
+    """
     transactions = []
-    ultima_data = None  # <- guardar última data válida para associar IOF
+    ultima_data = None 
 
     try:
         text_all = ""
@@ -32,75 +35,31 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
 
         text_section = text_all[detalhamento_pos:]
 
+        # Regex para capturar: Data | Descrição | Valor
         pattern = re.compile(
             r'(\d{2}/\d{2})\s+((?:(?!-?\d{1,3}(?:\.\d{3})*,\d{2}).)*?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})(?:\s|$)',
             re.MULTILINE
         )
 
-        all_matches_raw = list(pattern.finditer(text_section))
+        matches = list(pattern.finditer(text_section))
 
-        cleaned_matches = []
-        for match in all_matches_raw:
-            date = match.group(1)
-            desc = match.group(2).strip()
-            value = match.group(3)
+        for m in matches:
+            date = m.group(1)
+            desc = m.group(2).strip().upper() # Padronização para MAIÚSCULAS
+            value_str = m.group(3)
 
-            tem_parcela = bool(re.search(r'\s\d{2}/\d{2}(?:\s|$)', desc))
-
+            # 1. Limpeza de ruídos específicos do Santander na descrição
+            # Remove indicadores de parcelas (ex: /10) e números isolados no fim
             desc = re.sub(r'(?<!\d)/(?!\d)\s*\d+\s*$', '', desc).strip()
             desc = re.sub(r'^\s*\d+\s*(?!/)', '', desc).strip()
-            desc = re.sub(r'📳', '', desc).strip()
+            desc = re.sub(r'📳', '', desc).strip() # Remove emoji de notificação
 
-            cleaned_matches.append((match, date, desc, value, tem_parcela))
-
-        class Match:
-            def __init__(self, m, date, desc, val, parcela):
-                self.m = m
-                self._date = date
-                self._desc = desc
-                self._value = val
-                self._tem_parcela = parcela
-            def group(self, n):
-                if n == 0: return self.m.group(0)
-                if n == 1: return self._date
-                if n == 2: return self._desc
-                if n == 3: return self._value
-            def start(self):
-                return self.m.start()
-            def tem_parcela(self):
-                return self._tem_parcela
-
-        all_matches_raw = [Match(m, d, ds, v, p) for m, d, ds, v, p in cleaned_matches]
-
-        all_matches = []
-        for match in all_matches_raw:
-            desc = match.group(2).strip()
-            if re.match(r'^[A-ZÀ-Ÿ\s]+\s\.[A-Za-zÀ-Ÿ\s]+$', desc):
+            # 2. Filtros de segurança
+            if not desc or len(desc) < 2:
                 continue
-            all_matches.append(match)
-
-        occurrence_count = {}
-        for match in all_matches:
-            date = match.group(1)
-            desc = match.group(2).strip()
-            value_str = match.group(3)
-            value = float(value_str.replace(".", "").replace(",", "."))
-
-            key = (date, desc, value)
-            occurrence_count[key] = occurrence_count.get(key, 0) + 1
-
-        for match in all_matches:
-            date = match.group(1)
-            desc = match.group(2).strip()
-            value_str = match.group(3)
-
-            if not desc or len(desc) < 1:
+            if 'PAGAMENTO' in desc and 'FATURA' in desc:
                 continue
-
-            if not re.search(r'[A-Za-z0-9]', desc):
-                continue
-
-            if 'PAGAMENTO' in desc.upper() and 'FATURA' in desc.upper():
+            if re.match(r'^[A-ZÀ-Ÿ\s]+\s\.[A-ZÀ-Ÿ\s]+$', desc): # Filtro de metadados/cidades
                 continue
 
             try:
@@ -108,46 +67,34 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
             except ValueError:
                 continue
 
-            # guardar última data válida
             ultima_data = date
-
-            categories = load_categories()
-            category = find_category(desc, categories)
-            if not category:
-                category = "Sem categoria"
 
             transactions.append({
                 "data": date,
-                "descricao": desc.strip(),
+                "descricao": desc,
                 "valor": value,
-                "categoria": category
+                "categoria": "Sem categoria" # Router + JSON resolvem agora
             })
 
         # --------------------------------------------------
-        # EXTRAIR IOF DESPESA NO EXTERIOR
+        # TRATAMENTO ESPECIAL: IOF EXTERIOR
         # --------------------------------------------------
-
         iof_pattern = re.compile(r'IOF DESPESA NO EXTERIOR\s+(\d+,\d{2})')
         iof_matches = iof_pattern.findall(text_all)
 
-        if iof_matches:
-            for iof_value_str in iof_matches:
-                try:
-                    iof_value = float(iof_value_str.replace(".", "").replace(",", "."))
-
-                    transactions.append({
-                        "data": ultima_data if ultima_data else f"01/{mes_fatura:02d}",
-                        "descricao": "IOF DESPESA NO EXTERIOR",
-                        "valor": iof_value,
-                        "categoria": "Taxas"
-                    })
-
-                except ValueError:
-                    continue
+        for iof_val in iof_matches:
+            try:
+                val = float(iof_val.replace(".", "").replace(",", "."))
+                transactions.append({
+                    "data": ultima_data if ultima_data else f"01/{mes_fatura:02d}",
+                    "descricao": "IOF DESPESA NO EXTERIOR",
+                    "valor": val,
+                    "categoria": "Sem categoria"
+                })
+            except ValueError:
+                continue
 
     except Exception as e:
-        print(f"Erro: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Erro no parser Santander: {e}")
 
     return transactions

@@ -52,7 +52,7 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
         for m in matches:
 
             data = m.group(1)
-            desc = m.group(2).strip()
+            desc = m.group(2).strip().upper()
             valor_str = m.group(3)
             sinal = m.group(4)
 
