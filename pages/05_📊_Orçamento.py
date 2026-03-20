@@ -47,9 +47,11 @@ if st.button("📅 Copiar orçamento do mês anterior"):
 df_trans = carregar_transacoes()
 df_trans = df_trans[df_trans["categoria"] != "Descontos"]
 
+# Conversão de data sempre, independente de estar vazio
+df_trans["data"] = pd.to_datetime(df_trans["data"], errors="coerce")
+
 # Cálculo da Média Histórica (Para sugestão)
 if not df_trans.empty:
-    df_trans["data"] = pd.to_datetime(df_trans["data"])
     df_trans["mes_ref"] = df_trans["data"].dt.to_period("M")
     media_hist = df_trans.groupby(["categoria", "mes_ref"])["valor"].sum().reset_index()
     media_hist = media_hist.groupby("categoria")["valor"].mean().reset_index().rename(columns={"valor": "media"})
