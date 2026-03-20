@@ -2,8 +2,6 @@ import streamlit as st
 
 def apply_global_style():
 
-    st.set_page_config(layout="wide")
-
     st.markdown("""
         <style>
         

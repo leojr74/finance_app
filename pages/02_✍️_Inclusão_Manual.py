@@ -8,7 +8,6 @@ from ui import apply_global_style
 apply_global_style()
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Inclusão Manual", layout="wide")
 
 st.title("✍️ Inclusão Manual")
 st.markdown("Registre gastos em dinheiro, Pix ou outras transações manuais.")

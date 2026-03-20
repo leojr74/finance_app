@@ -7,9 +7,6 @@ from ui import apply_global_style
 
 apply_global_style()
 
-# --- CONFIGURAÇÃO DE INTERFACE ---
-st.set_page_config(page_title="Gerenciar Transações", layout="wide")
-
 # --- FUNÇÕES COM CACHE PARA ESCALABILIDADE ---
 @st.cache_data
 def limpar_descricao_cached(descricao):

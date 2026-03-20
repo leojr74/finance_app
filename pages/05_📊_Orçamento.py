@@ -11,7 +11,6 @@ from database import (
 )
 from ui import apply_global_style
 
-st.set_page_config(page_title="Orçamento", layout="wide")
 apply_global_style()
 
 st.title("📊 Planejamento de Orçamento")
