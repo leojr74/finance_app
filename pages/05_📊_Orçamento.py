@@ -86,7 +86,7 @@ df_edit = st.data_editor(
         "valor_real": st.column_config.NumberColumn("Gasto Realizado", format="R$ %.2f", disabled=True),
     },
     hide_index=True,
-    use_container_width=True
+    width="stretch"
 )
 
 if st.button("💾 Salvar Orçamento"):
@@ -198,7 +198,7 @@ if not df_edit.empty:
     # Juntar as camadas
     chart_final = alt.layer(bar_orc, bar_real, text_alerta).properties(height=alt.Step(40))
 
-    st.altair_chart(chart_final, use_container_width=True)
+    st.altair_chart(chart_final, width="stretch")
 
 # -----------------------------
 # 5. Métricas Finais
