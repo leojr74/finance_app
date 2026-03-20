@@ -3,7 +3,8 @@ import hashlib
 import pandas as pd
 from datetime import datetime, timedelta
 
-DB_PATH = "transacoes.db"
+import os as _os
+DB_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "transacoes.db")
 
 def conectar():
     return sqlite3.connect(DB_PATH)
