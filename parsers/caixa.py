@@ -1,4 +1,4 @@
-import pdfplumber
+import fitz
 import re
 from categorizer import load_categories, find_category
 
@@ -21,10 +21,9 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
     transactions = []
     try:
         text_all = ""
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text() or ""
-                text_all += page_text + "\n"
+        for page in fitz.open(pdf_path):
+            page_text = page.get_text() or ""
+            text_all += page_text + "\n"
         
         # Padrão: DD/MM + descrição + valor + indicador D/C (Débito/Crédito)
         pattern = re.compile(

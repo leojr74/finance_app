@@ -1,5 +1,5 @@
 
-import pdfplumber
+import fitz
 import re
 from categorizer import load_categories, find_category
 
@@ -24,10 +24,9 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
 
     try:
         text_all = ""
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text() or ""
-                text_all += page_text + "\n"
+        for page in fitz.open(pdf_path):
+            page_text = page.get_text() or ""
+            text_all += page_text + "\n"
 
         detalhamento_pos = text_all.find("Detalhamento da Fatura")
         if detalhamento_pos < 0:

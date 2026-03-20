@@ -1,4 +1,4 @@
-import pdfplumber
+import fitz
 import re
 from categorizer import load_categories, find_category
 
@@ -27,9 +27,8 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
     
     try:
         text_all = ""
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                text_all += (page.extract_text() or "") + "\n"
+        for page in fitz.open(pdf_path):
+            text_all += (page.get_text() or "") + "\n"
         
         # Localiza a seção de transações para evitar capturar o "Resumo" ou rodapés
         trans_pos = text_all.find("TRANSAÇÕES DE")

@@ -1,4 +1,4 @@
-import pdfplumber
+import fitz
 import re
 
 
@@ -13,10 +13,9 @@ def detect_bank(pdf_path):
     
     try:
         text_all = ""
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text() or ""
-                text_all += page_text + "\n"
+        for page in fitz.open(pdf_path):
+            page_text = page.get_text() or ""
+            text_all += page_text + "\n"
     except Exception as e:
         return None
     
@@ -129,11 +128,10 @@ def get_total_amount(pdf_path):
     
     try:
         text_all = ""
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text() or ""
-                text_all += page_text + "\n"
-                text_search = text_all[:1200]
+        for page in fitz.open(pdf_path):
+            page_text = page.get_text() or ""
+            text_all += page_text + "\n"
+        text_search = text_all[:1200]
 
     except Exception as e:
         return None
