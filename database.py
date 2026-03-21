@@ -6,9 +6,21 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 def conectar():
-    # Busca a URI que você colou nos "Secrets" do Streamlit
-    conn_url = st.secrets["DATABASE_URL"]
-    return psycopg2.connect(conn_url)
+    try:
+        # Puxa a URL dos Secrets
+        conn_url = st.secrets["DATABASE_URL"]
+        
+        # Criamos a conexão
+        conn = psycopg2.connect(conn_url)
+        
+        # IMPORTANTE: No PostgreSQL, precisamos configurar o autocommit 
+        # para comandos de criação de tabela (como o seu criar_tabela())
+        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        
+        return conn
+    except Exception as e:
+        st.error(f"Erro ao conectar ao banco: {e}")
+        return None
 
 def criar_tabela():
     with conectar() as conn:
