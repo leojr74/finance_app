@@ -96,7 +96,7 @@ with col_esq:
         color=alt.Color(field="categoria", type="nominal", scale=alt.Scale(scheme='tableau10')),
         tooltip=[alt.Tooltip("categoria"), alt.Tooltip("valor", format=",.2f")]
     ).properties(height=400)
-    st.altair_chart(pizza, width="stretch")
+    st.altair_chart(pizza, use_container_width=True)
 
 with col_dir:
     st.subheader("📊 Maiores Gastos")
