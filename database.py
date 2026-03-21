@@ -1,13 +1,14 @@
-import sqlite3
+import streamlit as st
+import psycopg2
+import os
 import hashlib
 import pandas as pd
 from datetime import datetime, timedelta
 
-import os as _os
-DB_PATH = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "transacoes.db")
-
 def conectar():
-    return sqlite3.connect(DB_PATH)
+    # Busca a URI que você colou nos "Secrets" do Streamlit
+    conn_url = st.secrets["DATABASE_URL"]
+    return psycopg2.connect(conn_url)
 
 def criar_tabela():
     with conectar() as conn:
@@ -61,7 +62,7 @@ def salvar_config_categoria(categoria, is_fixo):
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO config_categorias (categoria, is_fixo)
-            VALUES (?, ?)
+            VALUES (%s, %s)
             ON CONFLICT(categoria) DO UPDATE SET is_fixo = excluded.is_fixo
         ''', (categoria, 1 if is_fixo else 0))
         conn.commit()
@@ -103,14 +104,14 @@ def salvar_orcamento(categoria, valor, mes, ano):
         # Agora o ON CONFLICT vai encontrar o alvo correto
         cursor.execute('''
             INSERT INTO orcamentos (categoria, valor, mes, ano)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
             ON CONFLICT(categoria, mes, ano) DO UPDATE SET valor = excluded.valor
         ''', (categoria, valor, mes, ano))
         conn.commit()
 
 def carregar_orcamentos(mes, ano):
     with conectar() as conn:
-        return pd.read_sql_query("SELECT categoria, valor FROM orcamentos WHERE mes = ? AND ano = ?", 
+        return pd.read_sql_query("SELECT categoria, valor FROM orcamentos WHERE mes = %s AND ano = %s", 
                                  conn, params=(mes, ano))
     
 def save_all_changes(df):
@@ -120,7 +121,7 @@ def save_all_changes(df):
         for _, row in df.iterrows():
             cursor.execute('''
                 UPDATE transacoes 
-                SET categoria = ? 
-                WHERE id = ?
+                SET categoria = %s 
+                WHERE id = %s
             ''', (row['categoria'], row['id']))
         conn.commit()

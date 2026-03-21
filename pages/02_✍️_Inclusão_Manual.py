@@ -1,9 +1,10 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 import pandas as pd
 from datetime import date
 from categorizer import load_categories, find_category
 from ui import apply_global_style
+from database import conectar
 
 apply_global_style()
 
@@ -17,7 +18,7 @@ rules = load_categories()
 
 # Busca bancos existentes no banco de dados
 try:
-    conn = sqlite3.connect("transacoes.db")
+    conn = conectar()
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT banco FROM transacoes WHERE banco IS NOT NULL AND banco != ''")
     bancos_no_db = [row[0] for row in cursor.fetchall()]
@@ -94,12 +95,12 @@ if submit:
         st.error("❌ Digite o nome do novo banco para continuar.")
     else:
         try:
-            conn = sqlite3.connect("transacoes.db")
+            conn = conectar()
             cursor = conn.cursor()
             
             cursor.execute("""
                 INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 data_ins.strftime("%Y-%m-%d"),
                 desc_ins,
@@ -127,7 +128,7 @@ st.write("---")
 st.subheader("📋 Últimos Lançamentos Manuais")
 
 try:
-    conn = sqlite3.connect("transacoes.db")
+    conn = conectar()
     # Nota: Verifique se no seu INSERT você está usando 'MANUAL_ENTRY' ou 'MANUAL'
     df_recent = pd.read_sql_query("""
         SELECT data, descricao, valor, categoria, banco 

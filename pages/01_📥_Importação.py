@@ -1,11 +1,11 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-import sqlite3
 import hashlib
 import os
 import tempfile  # Adicionado para gerenciar arquivos temporários de forma única
 from ui import apply_global_style
+from database import conectar
 
 apply_global_style()
 
@@ -111,7 +111,7 @@ if uploaded:
             # --------------------------------------------------
             if st.button("💾 Salvar no banco"):
                 try:
-                    conn = sqlite3.connect("transacoes.db")
+                    conn = conectar()
                     cursor = conn.cursor()
                     
                     inseridas = 0
@@ -126,9 +126,9 @@ if uploaded:
                         # 1. Busca por lançamento MANUAL Prévio
                         cursor.execute("""
                             SELECT 1 FROM transacoes 
-                            WHERE data = ? 
-                              AND valor = ? 
-                              AND banco = ? 
+                            WHERE data = %s 
+                              AND valor = %s 
+                              AND banco = %s 
                               AND hash_fatura = 'MANUAL_ENTRY'
                         """, (data_str, valor, banco))
                         
@@ -139,16 +139,16 @@ if uploaded:
                         # 2. Busca por importação de PDF já realizada
                         cursor.execute("""
                             SELECT 1 FROM transacoes
-                            WHERE data = ? 
-                              AND descricao = ? 
-                              AND valor = ? 
-                              AND banco = ?
+                            WHERE data = %s 
+                              AND descricao = %s 
+                              AND valor = %s 
+                              AND banco = %s
                         """, (data_str, descricao, valor, banco))
 
                         if not cursor.fetchone():
                             cursor.execute("""
                                 INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura)
-                                VALUES (?, ?, ?, ?, ?, ?)
+                                VALUES (%s, %s, %s, %s, %s, %s)
                             """, (
                                 data_str,
                                 descricao,

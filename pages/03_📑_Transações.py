@@ -210,7 +210,7 @@ with b1:
         st.session_state.df_transacoes["SEL"] = False
         df_sql = st.session_state.df_transacoes.reset_index().drop(columns=["SEL"], errors='ignore')
         
-        # Converte data para string para o SQLite aceitar
+        # Converte data para string para o psycopg2 aceitar
         df_sql["data"] = pd.to_datetime(df_sql["data"]).dt.strftime('%Y-%m-%d')
         
         save_all_changes(df_sql)
