@@ -1,23 +1,25 @@
-
 import fitz
 import re
 
-
 def extract_transactions(pdf_path, mes_fatura, ano_fatura):
     """
-    Parser C&A (C&A Pay) - Extração simplificada (Limpa)
+    Parser C&A (C&A Pay) - Versão Robusta com PyMuPDF (fitz)
     """
     transactions = []
 
     try:
         text_all = ""
-        for page in fitz.open(pdf_path):
-            page_text = page.get_text() or ""
-            text_all += page_text + "\n"
+        # Usamos fitz para abrir o PDF
+        with fitz.open(pdf_path) as doc:
+            for page in doc:
+                # O parâmetro "text" garante uma extração mais linear
+                page_text = page.get_text("text") or ""
+                text_all += page_text + "\n"
 
         # Localiza a seção de transações
         demo_pos = text_all.find("Demonstrativo")
         if demo_pos < 0:
+            print("C&A: Seção Demonstrativo não encontrada.")
             return []
 
         # Define o fim da seção de leitura
@@ -27,27 +29,28 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
 
         text_section = text_all[demo_pos:fim_pos]
 
-        # Padrão: Data (DD/MM ou DD/MM/AAAA) + Descrição + Valor + Sinal opcional "-"
+        # Regex Ajustada: 
+        # 1. Permite espaços ou quebras de linha após a data
+        # 2. Melhora a captura da descrição
         pattern = re.compile(
-            r'(\d{2}/\d{2}(?:/\d{4})?)\s+(.+?)\s+(\d{1,3}(?:\.\d{3})*,\d{2})(-?)',
+            r'(\d{2}/\d{2}(?:/\d{4})?)\s+([\s\S]+?)\s+(\d{1,3}(?:\.\d{3})*,\d{2})(-?)',
             re.MULTILINE
         )
 
         for match in pattern.finditer(text_section):
-            date_str = match.group(1)
-            desc = match.group(2).strip().upper()
+            date_raw = match.group(1)
+            # Limpamos possíveis quebras de linha no meio da descrição
+            desc = match.group(2).replace('\n', ' ').strip().upper()
             value_str = match.group(3)
             has_minus = match.group(4)
 
             # Filtros de ruído
-            desc_upper = desc.upper()
             if not desc or len(desc) < 2:
                 continue
             
-            # Ignora linhas de sistema e totais
-            if any(x in desc_upper for x in [
+            if any(x in desc for x in [
                 'TOTAL', 'FATURA ANTERIOR', 'LIMITE', 
-                'CRÉDITO', 'DÉBITO', 'PAGAMENTO'
+                'CRÉDITO', 'DÉBITO', 'PAGAMENTO', 'SALDO'
             ]):
                 continue
 
@@ -59,22 +62,19 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
             except ValueError:
                 continue
 
-            # Normalização da data para o formato DD/MM esperado pelo Router
-            if date_str.count("/") == 2:
-                dia, mes, _ = date_str.split("/")
-                data_normalizada = f"{dia}/{mes}"
-            else:
-                data_normalizada = date_str
+            # Normalização da data para o formato DD/MM (O Router espera isso)
+            # Se vier DD/MM/AAAA, cortamos o ano.
+            parts = date_raw.split("/")
+            data_normalizada = f"{parts[0]}/{parts[1]}"
 
-            # Monta o dicionário com categoria neutra
             transactions.append({
-                "data": data_normalizada,
-                "descricao": desc.strip(),
+                "data": data_normalizada, # Chave essencial para o parser_router
+                "descricao": desc,
                 "valor": value,
-                "categoria": "Sem categoria" # O Router aplicará o seu JSON
+                "categoria": "Sem categoria" 
             })
 
     except Exception as e:
-        print(f"Erro no parser C&A: {e}")
+        print(f"Erro crítico no parser C&A: {e}")
 
     return transactions
