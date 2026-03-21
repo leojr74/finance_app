@@ -115,75 +115,83 @@ if uploaded:
                     conn = conectar()
                     cursor = conn.cursor()
                     
+                    # 1. CARREGA O HISTÓRICO DO BANCO (Para evitar o erro 'not defined')
+                    # Buscamos tudo o que já existe para comparar
+                    df_historico = pd.read_sql_query("SELECT data, descricao, valor, hash_fatura FROM transacoes", conn)
+                    df_historico['data'] = pd.to_datetime(df_historico['data']).dt.date
+
                     inseridas = 0
                     ignoradas_manual = 0
                     ignoradas_duplicadas = 0
 
-                    for _, row in df.iterrows():
-                        data_str = row["data"].strftime("%Y-%m-%d")
-                        valor = row["valor"]
-                        descricao = row["descricao"]
+                    # 2. LOOP DE PROCESSAMENTO (df_transacoes vem do st.session_state)
+                    df_para_salvar = st.session_state.df_transacoes
+                    
+                    for _, row in df_para_salvar.iterrows():
+                        transacao_data = pd.to_datetime(row['data'], dayfirst=True).date()
+                        descricao = str(row['descricao'])
+                        valor = float(row['valor'])
                         
-                        # 1. Busca por lançamento MANUAL Prévio
-                        cursor.execute("""
-                            SELECT 1 FROM transacoes 
-                            WHERE data = %s 
-                              AND valor = %s 
-                              AND banco = %s 
-                              AND hash_fatura = 'MANUAL_ENTRY'
-                        """, (data_str, valor, banco))
-                        
-                        if cursor.fetchone():
+                        # Verificação de duplicidade
+                        existe_manual = False
+                        existe_neste_pdf = False
+
+                        if not df_historico.empty:
+                            # Regra 1: Prioridade Manual (Mesma data, banco e valor com hash 'MANUAL_ENTRY')
+                            # Nota: Adicionei a verificação de banco se você tiver essa coluna no df_historico
+                            mask_manual = (df_historico['data'] == transacao_data) & \
+                                          (df_historico['valor'] == valor) & \
+                                          (df_historico['hash_fatura'] == 'MANUAL_ENTRY')
+                            
+                            if mask_manual.any():
+                                existe_manual = True
+
+                            # Regra 2: Evitar re-importar o mesmo PDF (Mesmo hash_fatura)
+                            mask_pdf = (df_historico['data'] == transacao_data) & \
+                                       (df_historico['descricao'] == descricao) & \
+                                       (df_historico['valor'] == valor) & \
+                                       (df_historico['hash_fatura'] == hash_fatura)
+                            
+                            if mask_pdf.any():
+                                existe_neste_pdf = True
+
+                        # 3. TOMADA DE DECISÃO
+                        if existe_manual:
                             ignoradas_manual += 1
                             continue
-
-                        # 2. Busca por importação de PDF já realizada
-                        cursor.execute("""
-                            SELECT 1 FROM transacoes
-                            WHERE data = %s 
-                              AND descricao = %s 
-                              AND valor = %s 
-                              AND banco = %s
-                        """, (data_str, descricao, valor, banco))
-
-                        if not cursor.fetchone():
-                            cursor.execute("""
-                                INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura)
-                                VALUES (%s, %s, %s, %s, %s, %s)
-                            """, (
-                                data_str,
-                                descricao,
-                                valor,
-                                row.get("categoria", "Sem categoria"),
-                                banco,
-                                hash_fatura
-                            ))
-                            inseridas += 1
-                        else:
+                        
+                        if existe_neste_pdf:
                             ignoradas_duplicadas += 1
+                            continue
+
+                        # Se chegou aqui, é uma transação nova ou uma das 4 iguais do mesmo PDF
+                        cursor.execute("""
+                            INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (
+                            transacao_data,
+                            descricao,
+                            valor,
+                            row.get("categoria", "Sem categoria"),
+                            banco,
+                            hash_fatura
+                        ))
+                        inseridas += 1
 
                     conn.commit()
-                    conn.close()
-
-                    if "df_transacoes" in st.session_state:
-                        del st.session_state.df_transacoes
-                    
                     st.success(f"✅ Processamento concluído: {inseridas} novas transações.")
                     
                     if ignoradas_manual > 0:
                         st.warning(f"📌 {ignoradas_manual} itens descartados (lançamento manual detectado).")
                     
-                    if ignoradas_duplicadas > 0:
-                        st.info(f"ℹ️ {ignoradas_duplicadas} itens já constavam no histórico.")
-                    
-                except psycopg2.errors.UniqueViolation:
-                    # Se o erro for de "Chave Duplicada", avisamos o usuário com calma
-                    st.warning("⚠️ Esta fatura já foi importada anteriormente (Hash duplicado).")
-                    conn.rollback() # Cancela a transação que deu erro
+                    if "df_transacoes" in st.session_state:
+                        del st.session_state.df_transacoes
+
                 except Exception as e:
+                    if conn: conn.rollback()
                     st.error(f"Erro ao acessar o banco de dados: {e}")
                 finally:
-                    conn.close()
+                    if conn: conn.close()
                     
 
     finally:
