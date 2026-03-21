@@ -59,6 +59,7 @@ if uploaded:
             df["data"] = pd.to_datetime(df["data"], format="%d/%m/%Y", errors="coerce")
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
             df = df.sort_values("data").reset_index(drop=True)
+            st.session_state.df_transacoes = df
 
             # --------------------------------------------------
             # Mapeamento para nomes amigáveis
