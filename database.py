@@ -146,13 +146,35 @@ def carregar_orcamentos(mes, ano):
                                  conn, params=(mes, ano))
     
 def save_all_changes(df):
-    """Atualiza as categorias das transações no banco de dados."""
+    """Sincroniza o banco de dados com o estado atual do editor (Update e Delete)."""
     with conectar() as conn:
-        cursor = conn.cursor()
-        for _, row in df.iterrows():
-            cursor.execute('''
-                UPDATE transacoes 
-                SET categoria = %s 
-                WHERE id = %s
-            ''', (row['categoria'], row['id']))
-        conn.commit()
+        if conn is None:
+            return
+            
+        try:
+            cursor = conn.cursor()
+            
+            # 1. Obter a lista de IDs que ainda existem no seu DataFrame
+            ids_presentes = df['id'].tolist()
+            
+            # 2. DELETAR o que não está mais no DataFrame
+            # Se a lista não estiver vazia, deletamos quem sumiu. 
+            # Se estiver vazia, significa que você apagou tudo no editor.
+            if ids_presentes:
+                # O formato %s com uma tupla é a forma correta do psycopg2 para o "IN"
+                cursor.execute("DELETE FROM transacoes WHERE id NOT IN %s", (tuple(ids_presentes),))
+            else:
+                cursor.execute("DELETE FROM transacoes")
+
+            # 3. ATUALIZAR as categorias de quem sobrou
+            for _, row in df.iterrows():
+                cursor.execute('''
+                    UPDATE transacoes 
+                    SET categoria = %s 
+                    WHERE id = %s
+                ''', (row['categoria'], row['id']))
+            
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            st.error(f"Erro ao salvar alterações no banco: {e}")
