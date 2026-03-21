@@ -107,7 +107,7 @@ with col_dir:
         color=alt.Color("categoria:N", legend=None, scale=alt.Scale(scheme='tableau10')),
         tooltip=[alt.Tooltip("categoria"), alt.Tooltip("valor", format=",.2f")]
     ).properties(height=400)
-    st.altair_chart(barras, width="stretch")
+    st.altair_chart(barras, use_container_width=True)
 
 st.write("---")
 st.caption("v2.5 | Dashboard Dinâmico (Últimos 30 dias)")
