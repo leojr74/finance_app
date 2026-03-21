@@ -115,81 +115,71 @@ if uploaded:
                     conn = conectar()
                     cursor = conn.cursor()
                     
-                    # 1. CARREGA O HISTÓRICO DO BANCO (Para evitar o erro 'not defined')
-                    # Buscamos tudo o que já existe para comparar
-                    df_historico = pd.read_sql_query("SELECT data, descricao, valor, hash_fatura FROM transacoes", conn)
-                    df_historico['data'] = pd.to_datetime(df_historico['data']).dt.date
+                    # 1. Carrega o histórico de forma limpa
+                    df_h = pd.read_sql_query("SELECT data, valor, banco, hash_fatura FROM transacoes", conn)
+                    
+                    # Normalização crítica de tipos
+                    if not df_h.empty:
+                        df_h['data'] = pd.to_datetime(df_h['data']).dt.date
+                        df_h['valor'] = df_h['valor'].astype(float).round(2)
+                        df_h['banco'] = df_h['banco'].astype(str)
 
                     inseridas = 0
                     ignoradas_manual = 0
                     ignoradas_duplicadas = 0
 
-                    # 2. LOOP DE PROCESSAMENTO (df_transacoes vem do st.session_state)
                     df_para_salvar = st.session_state.df_transacoes
-                    
+                    banco_atual = result.get('bank', 'Desconhecido')
+
                     for _, row in df_para_salvar.iterrows():
-                        transacao_data = pd.to_datetime(row['data'], dayfirst=True).date()
-                        descricao = str(row['descricao'])
-                        valor = float(row['valor'])
+                        t_data = pd.to_datetime(row['data'], dayfirst=True).date()
+                        t_valor = round(float(row['valor']), 2)
+                        t_desc = str(row['descricao'])
                         
-                        # Verificação de duplicidade
-                        existe_manual = False
-                        existe_neste_pdf = False
-
-                        if not df_historico.empty:
-                            # Regra 1: Prioridade Manual (Mesma data, banco e valor com hash 'MANUAL_ENTRY')
-                            # Nota: Adicionei a verificação de banco se você tiver essa coluna no df_historico
-                            mask_manual = (df_historico['data'] == transacao_data) & \
-                                          (df_historico['valor'] == valor) & \
-                                          (df_historico['hash_fatura'] == 'MANUAL_ENTRY')
+                        # 2. COMPARAÇÃO DIRETA (Sem .any() genérico)
+                        # Criamos um sub-dataframe apenas com o que coincide EXATAMENTE
+                        if not df_h.empty:
+                            # Filtro para Manual: Data + Valor + Banco + Flag Manual
+                            conflito_manual = df_h[
+                                (df_h['data'] == t_data) & 
+                                (df_h['valor'] == t_valor) & 
+                                (df_h['banco'] == banco_atual) & 
+                                (df_h['hash_fatura'] == 'MANUAL_ENTRY')
+                            ]
                             
-                            if mask_manual.any():
-                                existe_manual = True
-
-                            # Regra 2: Evitar re-importar o mesmo PDF (Mesmo hash_fatura)
-                            mask_pdf = (df_historico['data'] == transacao_data) & \
-                                       (df_historico['descricao'] == descricao) & \
-                                       (df_historico['valor'] == valor) & \
-                                       (df_historico['hash_fatura'] == hash_fatura)
+                            # Filtro para Mesma Fatura: Data + Descrição + Valor + Mesmo Hash
+                            conflito_pdf = df_h[
+                                (df_h['hash_fatura'] == hash_fatura) & 
+                                (df_h['descricao'] == t_desc) &
+                                (df_h['valor'] == t_valor)
+                            ]
                             
-                            if mask_pdf.any():
-                                existe_neste_pdf = True
+                            if not conflito_manual.empty:
+                                ignoradas_manual += 1
+                                continue
+                                
+                            if not conflito_pdf.empty:
+                                ignoradas_duplicadas += 1
+                                continue
 
-                        # 3. TOMADA DE DECISÃO
-                        if existe_manual:
-                            ignoradas_manual += 1
-                            continue
-                        
-                        if existe_neste_pdf:
-                            ignoradas_duplicadas += 1
-                            continue
-
-                        # Se chegou aqui, é uma transação nova ou uma das 4 iguais do mesmo PDF
+                        # 3. Se passou pelos filtros, insere
                         cursor.execute("""
                             INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura)
                             VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (
-                            transacao_data,
-                            descricao,
-                            valor,
-                            row.get("categoria", "Sem categoria"),
-                            banco,
-                            hash_fatura
-                        ))
+                        """, (t_data, t_desc, t_valor, row.get("categoria", "Sem categoria"), banco_atual, hash_fatura))
                         inseridas += 1
 
                     conn.commit()
-                    st.success(f"✅ Processamento concluído: {inseridas} novas transações.")
-                    
+                    st.success(f"✅ Concluído! {inseridas} inseridas.")
                     if ignoradas_manual > 0:
-                        st.warning(f"📌 {ignoradas_manual} itens descartados (lançamento manual detectado).")
+                        st.warning(f"📌 {ignoradas_manual} bloqueadas por regra manual.")
                     
                     if "df_transacoes" in st.session_state:
                         del st.session_state.df_transacoes
-
+                
                 except Exception as e:
                     if conn: conn.rollback()
-                    st.error(f"Erro ao acessar o banco de dados: {e}")
+                    st.error(f"Erro: {e}")
                 finally:
                     if conn: conn.close()
                     
