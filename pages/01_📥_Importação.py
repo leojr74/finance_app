@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
 import hashlib
 import os
-import tempfile  # Adicionado para gerenciar arquivos temporários de forma única
+import psycopg2
+import tempfile
+from datetime import date
 from ui import apply_global_style
 from database import conectar
 
@@ -175,8 +176,15 @@ if uploaded:
                     if ignoradas_duplicadas > 0:
                         st.info(f"ℹ️ {ignoradas_duplicadas} itens já constavam no histórico.")
                     
+                except psycopg2.errors.UniqueViolation:
+                    # Se o erro for de "Chave Duplicada", avisamos o usuário com calma
+                    st.warning("⚠️ Esta fatura já foi importada anteriormente (Hash duplicado).")
+                    conn.rollback() # Cancela a transação que deu erro
                 except Exception as e:
                     st.error(f"Erro ao acessar o banco de dados: {e}")
+                finally:
+                    conn.close()
+                    
 
     finally:
         # LIMPEZA OBRIGATÓRIA: Deleta o arquivo temporário após o uso, 
