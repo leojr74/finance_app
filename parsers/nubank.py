@@ -80,6 +80,16 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
 
         text_section = text_all[trans_pos:fim_pos]
 
+        # DEBUG TEMPORÁRIO - remover após identificar o problema
+        for line in text_section.split("\n")[:10]:
+            line = line.strip()
+            if not line:
+                continue
+            print("LINE:", repr(line))
+            for ch in line:
+                if ord(ch) > 127:
+                    print(f"  char especial: {repr(ch)} = U+{ord(ch):04X}")
+
         re_pos = re.compile(r'^(\d{2})\s+(\w{3})\s+(.+?)\s+R\$\s+(\d{1,3}(?:\.\d{3})*,\d{2})$')
         # Usa variável para o caractere − (U+2212) — raw string não interpreta \u
         re_neg = re.compile(
