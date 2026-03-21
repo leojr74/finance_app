@@ -36,14 +36,11 @@ if data_fim < data_inicio:
 uploaded = st.file_uploader("Upload da fatura PDF", type="pdf")
 
 if uploaded:
-    # Criamos um arquivo temporário com nome único e aleatório
-    # delete=False permite que o arquivo seja fechado e aberto pelo parser_router
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded.read())
-        tmp_path = tmp_file.name # Caminho único gerado pelo sistema (ex: C:\Temp\tmpxyz.pdf)
+        tmp_path = tmp_file.name
 
     try:
-        # O parser_router agora recebe o caminho ÚNICO e SEGURO
         result = extract_transactions_auto(
             pdf_path=tmp_path,
             data_inicio=data_inicio,
@@ -51,21 +48,20 @@ if uploaded:
         )
 
         if result and "transactions" in result:
+            # Criamos o DataFrame e garantimos as colunas IMEDIATAMENTE
             df = pd.DataFrame(result["transactions"])
-
-            # --------------------------------------------------
-            # Normalizar dados
-            # --------------------------------------------------
-            df["data"] = pd.to_datetime(df["data"], format="%d/%m/%Y", errors="coerce")
+            
+            # Normalização crítica
+            df["data"] = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+            df["descricao"] = df["descricao"].astype(str).str.upper()
+            
             df = df.sort_values("data").reset_index(drop=True)
+            
+            # SALVAMOS NO STATE PARA O BOTÃO ENCONTRAR
             st.session_state.df_transacoes = df
 
-            # --------------------------------------------------
-            # Mapeamento para nomes amigáveis
-            # --------------------------------------------------
             id_tecnico = str(result.get("bank", "DESCONHECIDO")).lower()
-
             mapeamento_nomes = {
                 "ca": "CARTÃO C&A",
                 "caixa": "CARTÃO CAIXA",
@@ -77,21 +73,12 @@ if uploaded:
                 "nubank": "CARTÃO NUBANK",
                 "mercado_pago": "MERCADO PAGO"
             }
+            banco_nome = mapeamento_nomes.get(id_tecnico, id_tecnico.upper())
 
-            banco = mapeamento_nomes.get(id_tecnico, id_tecnico.upper())
-
-            # --------------------------------------------------
-            # Dataframe apenas para exibição
-            # --------------------------------------------------
-            colunas_desejadas = ["data", "descricao", "valor"]
-            colunas_existentes = [c for c in colunas_desejadas if c in df.columns]
-            
-            df_display = df[colunas_existentes].copy()
-
-            st.success(f"{len(df)} transações extraídas de: **{banco}**")
+            st.success(f"{len(df)} transações extraídas de: **{banco_nome}**")
 
             st.dataframe(
-                df_display, 
+                df[["data", "descricao", "valor"]], 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
@@ -101,54 +88,45 @@ if uploaded:
                 }
             )
 
-            total = df["valor"].sum()
-            st.info(f"Total das transações: R$ {total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-
-            # Hash da fatura para controle de lote
-            hash_base = f"{banco}_{data_inicio}_{data_fim}"
+            hash_base = f"{banco_nome}_{data_inicio}_{data_fim}"
             hash_fatura = hashlib.sha256(hash_base.encode()).hexdigest()
 
-            # --------------------------------------------------
-            # Botão salvar
-            # --------------------------------------------------
             if st.button("💾 Salvar no banco"):
                 try:
                     conn = conectar()
                     cursor = conn.cursor()
                     
-                    # 1. Carrega o histórico de forma limpa
-                    df_h = pd.read_sql_query("SELECT data, valor, banco, hash_fatura FROM transacoes", conn)
+                    # 1. Busca histórico para cruzamento (incluindo descrição e banco)
+                    df_h = pd.read_sql_query("SELECT data, valor, banco, hash_fatura, descricao FROM transacoes", conn)
                     
-                    # Normalização crítica de tipos
                     if not df_h.empty:
                         df_h['data'] = pd.to_datetime(df_h['data']).dt.date
                         df_h['valor'] = df_h['valor'].astype(float).round(2)
                         df_h['banco'] = df_h['banco'].astype(str)
+                        df_h['descricao'] = df_h['descricao'].astype(str).str.upper()
 
                     inseridas = 0
                     ignoradas_manual = 0
                     ignoradas_duplicadas = 0
 
-                    df_para_salvar = st.session_state.df_transacoes
-                    banco_atual = result.get('bank', 'Desconhecido')
+                    # Pegamos os dados que salvamos lá em cima
+                    dados_para_salvar = st.session_state.df_transacoes
 
-                    for _, row in df_para_salvar.iterrows():
-                        t_data = pd.to_datetime(row['data'], dayfirst=True).date()
+                    for _, row in dados_para_salvar.iterrows():
+                        t_data = row['data'].date()
                         t_valor = round(float(row['valor']), 2)
                         t_desc = str(row['descricao'])
                         
-                        # 2. COMPARAÇÃO DIRETA (Sem .any() genérico)
-                        # Criamos um sub-dataframe apenas com o que coincide EXATAMENTE
                         if not df_h.empty:
-                            # Filtro para Manual: Data + Valor + Banco + Flag Manual
+                            # Filtro Manual: Precisa bater DATA + VALOR + BANCO
                             conflito_manual = df_h[
                                 (df_h['data'] == t_data) & 
                                 (df_h['valor'] == t_valor) & 
-                                (df_h['banco'] == banco_atual) & 
+                                (df_h['banco'] == banco_nome) & 
                                 (df_h['hash_fatura'] == 'MANUAL_ENTRY')
                             ]
                             
-                            # Filtro para Mesma Fatura: Data + Descrição + Valor + Mesmo Hash
+                            # Filtro Duplicado: Já existe neste PDF?
                             conflito_pdf = df_h[
                                 (df_h['hash_fatura'] == hash_fatura) & 
                                 (df_h['descricao'] == t_desc) &
@@ -163,30 +141,29 @@ if uploaded:
                                 ignoradas_duplicadas += 1
                                 continue
 
-                        # 3. Se passou pelos filtros, insere
                         cursor.execute("""
                             INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura)
                             VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (t_data, t_desc, t_valor, row.get("categoria", "Sem categoria"), banco_atual, hash_fatura))
+                        """, (t_data, t_desc, t_valor, row.get("categoria", "Sem categoria"), banco_nome, hash_fatura))
                         inseridas += 1
 
                     conn.commit()
-                    st.success(f"✅ Concluído! {inseridas} inseridas.")
+                    st.success(f"✅ Processamento concluído: {inseridas} novas transações.")
+                    
                     if ignoradas_manual > 0:
-                        st.warning(f"📌 {ignoradas_manual} bloqueadas por regra manual.")
+                        st.warning(f"📌 {ignoradas_manual} itens ignorados por já existirem como Manual.")
                     
                     if "df_transacoes" in st.session_state:
                         del st.session_state.df_transacoes
-                
+
                 except Exception as e:
                     if conn: conn.rollback()
-                    st.error(f"Erro: {e}")
+                    st.error(f"Erro ao salvar: {e}")
                 finally:
                     if conn: conn.close()
                     
-
+    except Exception as e:
+        st.error(f"Erro no processamento: {e}")
     finally:
-        # LIMPEZA OBRIGATÓRIA: Deleta o arquivo temporário após o uso, 
-        # mesmo que ocorra um erro no processamento.
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
