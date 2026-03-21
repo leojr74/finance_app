@@ -5,47 +5,61 @@ import hashlib
 import pandas as pd
 from datetime import datetime, timedelta
 
+import psycopg2
+import streamlit as st
+
 def conectar():
     try:
-        # Puxa a URL dos Secrets
+        # Puxa a URL que você configurou nos Secrets
         conn_url = st.secrets["DATABASE_URL"]
         
-        # Criamos a conexão
-        conn = psycopg2.connect(conn_url)
-        
-        # IMPORTANTE: No PostgreSQL, precisamos configurar o autocommit 
-        # para comandos de criação de tabela (como o seu criar_tabela())
-        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-        
-        return conn
+        # Conectamos com um tempo de limite para não travar o app se o banco demorar
+        return psycopg2.connect(conn_url, connect_timeout=10)
     except Exception as e:
-        st.error(f"Erro ao conectar ao banco: {e}")
+        st.error(f"Erro ao conectar ao Supabase: {e}")
         return None
 
 def criar_tabela():
-    with conectar() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS transacoes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                data TEXT, descricao TEXT, valor REAL,
-                categoria TEXT, banco TEXT, hash_fatura TEXT
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS orcamentos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                categoria TEXT, valor REAL, mes INTEGER, ano INTEGER,
-                UNIQUE(categoria, mes, ano)
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS config_categorias (
-                categoria TEXT PRIMARY KEY,
-                is_fixo INTEGER DEFAULT 0
-            )
-        ''')
-        conn.commit()
+    conn = conectar()
+    if not conn: return # Proteção contra None
+    
+    try:
+        with conn.cursor() as cursor:
+            # Tabela de Transações (Ajustada para PostgreSQL)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS transacoes (
+                    id SERIAL PRIMARY KEY,
+                    data DATE, 
+                    descricao TEXT, 
+                    valor DECIMAL,
+                    categoria TEXT, 
+                    banco TEXT, 
+                    hash_fatura TEXT
+                )
+            ''')
+            
+            # Tabela de Orçamentos
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS orcamentos (
+                    id SERIAL PRIMARY KEY,
+                    categoria TEXT, 
+                    valor DECIMAL, 
+                    mes INTEGER, 
+                    ano INTEGER,
+                    UNIQUE(categoria, mes, ano)
+                )
+            ''')
+            
+            # Tabela de Configurações
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS config_categorias (
+                    categoria TEXT PRIMARY KEY,
+                    is_fixo INTEGER DEFAULT 0
+                )
+            ''')
+            conn.commit()
+    finally:
+        conn.close()
 
 # --- COMPATIBILIDADE ---
 def criar_tabela_orcamentos():
@@ -90,18 +104,20 @@ def get_gastos_fixos():
 
 # --- CARREGAMENTO ---
 def carregar_transacoes(dias=None):
-    with conectar() as conn:
-        try:
-            if dias:
-                # Calcula a data de corte (hoje - X dias)
-                data_corte = (datetime.now() - timedelta(days=dias)).strftime('%Y-%m-%d')
-                query = f"SELECT * FROM transacoes WHERE data >= '{data_corte}' ORDER BY data DESC"
-            else:
-                query = "SELECT * FROM transacoes ORDER BY data DESC"
-            
+    conn = conectar()
+    if not conn: return pd.DataFrame()
+    
+    try:
+        if dias:
+            data_corte = (datetime.now() - timedelta(days=dias)).date()
+            # No Postgres, usamos %s para passar parâmetros, mesmo no read_sql
+            query = "SELECT * FROM transacoes WHERE data >= %s ORDER BY data DESC"
+            return pd.read_sql_query(query, conn, params=(data_corte,))
+        else:
+            query = "SELECT * FROM transacoes ORDER BY data DESC"
             return pd.read_sql_query(query, conn)
-        except:
-            return pd.DataFrame()
+    finally:
+        conn.close()
 
 def salvar_orcamento(categoria, valor, mes, ano):
     with conectar() as conn:
