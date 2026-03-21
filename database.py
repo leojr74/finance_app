@@ -21,11 +21,12 @@ def conectar():
 
 def criar_tabela():
     conn = conectar()
-    if not conn: return # Proteção contra None
-    
+    if conn is None:
+        return
+
     try:
         with conn.cursor() as cursor:
-            # Tabela de Transações (Ajustada para PostgreSQL)
+            # TABELA TRANSACOES: Trocamos INTEGER PRIMARY KEY AUTOINCREMENT por SERIAL PRIMARY KEY
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS transacoes (
                     id SERIAL PRIMARY KEY,
@@ -38,7 +39,7 @@ def criar_tabela():
                 )
             ''')
             
-            # Tabela de Orçamentos
+            # TABELA ORCAMENTOS: Trocamos REAL por DECIMAL e AUTOINCREMENT por SERIAL
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS orcamentos (
                     id SERIAL PRIMARY KEY,
@@ -50,7 +51,7 @@ def criar_tabela():
                 )
             ''')
             
-            # Tabela de Configurações
+            # TABELA CONFIGURACOES
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS config_categorias (
                     categoria TEXT PRIMARY KEY,
@@ -58,6 +59,8 @@ def criar_tabela():
                 )
             ''')
             conn.commit()
+    except Exception as e:
+        st.error(f"Erro ao criar tabelas no Supabase: {e}")
     finally:
         conn.close()
 
