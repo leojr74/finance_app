@@ -199,7 +199,7 @@ if not df_edit.empty:
     # Juntar as camadas
     chart_final = alt.layer(bar_orc, bar_real, text_alerta).properties(height=alt.Step(40))
 
-    st.altair_chart(chart_final, width="stretch")
+    st.altair_chart(chart_final, use_container_width=True)
 
 # -----------------------------
 # 5. Métricas Finais
