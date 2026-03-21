@@ -48,19 +48,19 @@ if uploaded:
         )
 
         if result and "transactions" in result:
-            # Criamos o DataFrame e garantimos as colunas IMEDIATAMENTE
             df = pd.DataFrame(result["transactions"])
             
-            # Normalização crítica
+            # Normalização para garantir que cálculos e exibições funcionem
             df["data"] = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
             df["descricao"] = df["descricao"].astype(str).str.upper()
             
             df = df.sort_values("data").reset_index(drop=True)
             
-            # SALVAMOS NO STATE PARA O BOTÃO ENCONTRAR
+            # Guardamos no state para o botão "Salvar" ter acesso aos dados
             st.session_state.df_transacoes = df
 
+            # Identificação do Banco para exibição
             id_tecnico = str(result.get("bank", "DESCONHECIDO")).lower()
             mapeamento_nomes = {
                 "ca": "CARTÃO C&A",
@@ -75,7 +75,8 @@ if uploaded:
             }
             banco_nome = mapeamento_nomes.get(id_tecnico, id_tecnico.upper())
 
-            st.success(f"{len(df)} transações extraídas de: **{banco_nome}**")
+            # --- EXIBIÇÃO DOS RESULTADOS ---
+            st.success(f"✅ {len(df)} transações extraídas de: **{banco_nome}**")
 
             st.dataframe(
                 df[["data", "descricao", "valor"]], 
@@ -88,37 +89,42 @@ if uploaded:
                 }
             )
 
+            # --- O SOMATÓRIO QUE VOCÊ SOLICITOU ---
+            total_fatura = df["valor"].sum()
+            st.metric(label="Total Extraído", value=f"R$ {total_fatura:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            st.info("💡 Verifique se o valor acima coincide com o total da sua fatura PDF.")
+
+            # Hash para evitar duplicidade de importação da mesma fatura
             hash_base = f"{banco_nome}_{data_inicio}_{data_fim}"
             hash_fatura = hashlib.sha256(hash_base.encode()).hexdigest()
 
+            # --------------------------------------------------
+            # Botão salvar
+            # --------------------------------------------------
             if st.button("💾 Salvar no banco"):
                 try:
                     conn = conectar()
                     cursor = conn.cursor()
                     
-                    # 1. Busca histórico para cruzamento (incluindo descrição e banco)
+                    # Busca histórico para checar duplicados
                     df_h = pd.read_sql_query("SELECT data, valor, banco, hash_fatura, descricao FROM transacoes", conn)
                     
                     if not df_h.empty:
                         df_h['data'] = pd.to_datetime(df_h['data']).dt.date
                         df_h['valor'] = df_h['valor'].astype(float).round(2)
                         df_h['banco'] = df_h['banco'].astype(str)
-                        df_h['descricao'] = df_h['descricao'].astype(str).str.upper()
 
                     inseridas = 0
                     ignoradas_manual = 0
-                    ignoradas_duplicadas = 0
-
-                    # Pegamos os dados que salvamos lá em cima
-                    dados_para_salvar = st.session_state.df_transacoes
-
-                    for _, row in dados_para_salvar.iterrows():
+                    
+                    # Processa cada linha do dataframe armazenado no state
+                    for _, row in st.session_state.df_transacoes.iterrows():
                         t_data = row['data'].date()
                         t_valor = round(float(row['valor']), 2)
                         t_desc = str(row['descricao'])
                         
+                        # Filtro contra lançamentos manuais já existentes (Evita duplicar o que você já lançou)
                         if not df_h.empty:
-                            # Filtro Manual: Precisa bater DATA + VALOR + BANCO
                             conflito_manual = df_h[
                                 (df_h['data'] == t_data) & 
                                 (df_h['valor'] == t_valor) & 
@@ -126,19 +132,8 @@ if uploaded:
                                 (df_h['hash_fatura'] == 'MANUAL_ENTRY')
                             ]
                             
-                            # Filtro Duplicado: Já existe neste PDF?
-                            conflito_pdf = df_h[
-                                (df_h['hash_fatura'] == hash_fatura) & 
-                                (df_h['descricao'] == t_desc) &
-                                (df_h['valor'] == t_valor)
-                            ]
-                            
                             if not conflito_manual.empty:
                                 ignoradas_manual += 1
-                                continue
-                                
-                            if not conflito_pdf.empty:
-                                ignoradas_duplicadas += 1
                                 continue
 
                         cursor.execute("""
@@ -148,14 +143,14 @@ if uploaded:
                         inseridas += 1
 
                     conn.commit()
-                    st.success(f"✅ Processamento concluído: {inseridas} novas transações.")
+                    st.success(f"✅ {inseridas} transações salvas com sucesso!")
                     
                     if ignoradas_manual > 0:
-                        st.warning(f"📌 {ignoradas_manual} itens ignorados por já existirem como Manual.")
+                        st.warning(f"📌 {ignoradas_manual} transações ignoradas por já existirem no lançamento manual.")
                     
-                    if "df_transacoes" in st.session_state:
-                        del st.session_state.df_transacoes
-
+                    # Limpa o state para a próxima importação
+                    del st.session_state.df_transacoes
+                    
                 except Exception as e:
                     if conn: conn.rollback()
                     st.error(f"Erro ao salvar: {e}")

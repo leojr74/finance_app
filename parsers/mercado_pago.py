@@ -1,34 +1,20 @@
 import fitz
 import re
-from categorizer import load_categories, find_category
-
-
-def ajustar_data_compra(dia, mes_fatura, ano_fatura, inicio_ciclo=13):
-    """Ajustar data da compra ao mês da fatura"""
-    if dia >= inicio_ciclo:
-        mes = mes_fatura - 1
-    else:
-        mes = mes_fatura
-    if mes == 0:
-        mes = 12
-        ano = ano_fatura - 1
-    else:
-        ano = ano_fatura
-    return f"{dia:02d}/{mes:02d}/{ano}"
-
 
 def extract_transactions(pdf_path, mes_fatura, ano_fatura):
     """
-    Parser para Mercado Pago - Extração limpa e em MAIÚSCULAS
+    Parser para Mercado Pago - Versão Robusta com PyMuPDF (fitz)
     """
     transactions = []
     try:
         text_all = ""
-        for page in fitz.open(pdf_path):
-            page_text = page.get_text() or ""
-            text_all += page_text + "\n"
+        with fitz.open(pdf_path) as doc:
+            for page in doc:
+                # O modo "text" ajuda a manter a ordem visual das colunas
+                page_text = page.get_text("text") or ""
+                text_all += page_text + "\n"
         
-        # Localiza a seção específica do cartão para evitar capturar pagamentos da conta corrente
+        # 1. Localização da seção específica do cartão
         cartao_pos = text_all.find("Cartão Visa")
         if cartao_pos < 0:
             return []
@@ -43,40 +29,46 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
         
         text_section = text_all[mov_pos:fim_pos]
         
-        # Padrão: DD/MM + descrição + sinal opcional + R$ + valor
-        # O sinal "-" pode vir antes do "R$" em caso de estornos
+        # 2. Regex Flexível:
+        # (\d{2}/\d{2}) -> Data
+        # ([\s\S]+?)   -> Descrição (aceita múltiplas linhas/espaços)
+        # (-?\s*R\$)   -> Sinal opcional + R$
+        # (\d{1,3}...) -> Valor
         pattern = re.compile(
-            r'(\d{2}/\d{2})\s+(.+?)\s+(-?)\s*R\$\s+(\d{1,3}(?:\.\d{3})*,\d{2})',
+            r'(\d{2}/\d{2})\s+([\s\S]+?)\s+(-?\s*R\$\s+)(\d{1,3}(?:\.\d{3})*,\d{2})',
             re.MULTILINE
         )
         
         for match in pattern.finditer(text_section):
             date = match.group(1)
-            desc = match.group(2).strip().upper() # Padronização para MAIÚSCULAS
-            sinal = match.group(3)
+            # Limpa quebras de linha que o fitz insere no meio de nomes longos
+            desc = match.group(2).replace('\n', ' ').strip().upper() 
+            sinal_str = match.group(3)
             value_str = match.group(4)
             
-            # Filtros de ruído (Títulos e totalizadores do Mercado Pago)
+            # Filtros de ruído (Títulos e totalizadores)
             if not desc or len(desc) < 2:
                 continue
                 
-            if any(x in desc for x in ['CONSUMOS DE', 'PAGAMENTO DA FATURA', 'DATA MOVIMENTAÇÕES', 'CARTÃO VISA']):
+            blacklist = ['CONSUMOS DE', 'PAGAMENTO DA FATURA', 'DATA MOVIMENTAÇÕES', 'CARTÃO VISA', 'TOTAL']
+            if any(x in desc for x in blacklist):
                 continue
             
             try:
                 # Conversão numérica
                 value = float(value_str.replace(".", "").replace(",", "."))
-                if sinal == "-":
+                
+                # No Mercado Pago, o "-" costuma vir colado ou antes do R$
+                if "-" in sinal_str:
                     value = -value
             except ValueError:
                 continue
             
-            # Monta o dicionário simplificado para o Router
             transactions.append({
                 "data": date,
                 "descricao": desc,
                 "valor": value,
-                "categoria": "Sem categoria" # O Router aplicará o seu JSON centralizado
+                "categoria": "Sem categoria"
             })
     
     except Exception as e:

@@ -1,99 +1,135 @@
 import fitz
 import re
-from categorizer import load_categories, find_category
 
-def ajustar_data_compra(dia, mes_fatura, ano_fatura, inicio_ciclo=12):
-    if dia >= inicio_ciclo:
-        mes = mes_fatura - 1
-    else:
-        mes = mes_fatura
-    if mes == 0:
-        mes = 12
-        ano = ano_fatura - 1
-    else:
-        ano = ano_fatura
-    return f"{dia:02d}/{mes:02d}/{ano}"
+
+def extrair_linhas_por_coordenada(page, tolerancia=1.0):
+    """
+    Extrai spans via get_text("dict") e reconstrói linhas agrupando por Y.
+    O Itaú tem layout de duas colunas — spans da mesma linha têm top idêntico.
+    """
+    data = page.get_text("dict")
+    spans = []
+
+    for block in data.get("blocks", []):
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                texto = span["text"].strip()
+                if not texto:
+                    continue
+                spans.append({
+                    "text": texto,
+                    "x0": span["bbox"][0],
+                    "top": span["bbox"][1]
+                })
+
+    if not spans:
+        return []
+
+    spans.sort(key=lambda s: s["top"])
+
+    linhas = []
+    linha_atual = [spans[0]]
+    y_max = spans[0]["top"]
+
+    for span in spans[1:]:
+        if span["top"] <= y_max + tolerancia:
+            linha_atual.append(span)
+            y_max = max(y_max, span["top"])
+        else:
+            linha_atual.sort(key=lambda s: s["x0"])
+            linhas.append(" ".join(s["text"] for s in linha_atual))
+            linha_atual = [span]
+            y_max = span["top"]
+
+    if linha_atual:
+        linha_atual.sort(key=lambda s: s["x0"])
+        linhas.append(" ".join(s["text"] for s in linha_atual))
+
+    return linhas
+
 
 def extract_transactions(pdf_path, mes_fatura, ano_fatura):
-    """
-    Parser para Itaú - Extração limpa com suporte a parcelados e MAIÚSCULAS
-    """
     transactions = []
+
     try:
-        text_all = ""
-        for page in fitz.open(pdf_path):
-            page_text = page.get_text() or ""
-            text_all += page_text + "\n"
-        
+        doc = fitz.open(pdf_path)
+        all_lines = []
+        for page in doc:
+            all_lines.extend(extrair_linhas_por_coordenada(page))
+
+        text_all = "\n".join(all_lines)
+
         lancamentos_pos = text_all.find("Lançamentos: compras e saques")
         if lancamentos_pos < 0:
             return []
-        
+
         compras_parceladas_pos = text_all.find("Compras parceladas - próximas faturas", lancamentos_pos)
         proxima_fatura_pos = text_all.find("Próxima fatura", lancamentos_pos)
-        
+
         text_section = text_all[lancamentos_pos:]
-        pattern = re.compile(r'(\d{2}/\d{2})\s+(.+?)(\d{1,3}(?:\.\d{3})*,\d{2})')
+
+        pattern = re.compile(r'(\d{2}/\d{2})\s+(.+?)\s+(\d{1,3}(?:\.\d{3})*,\d{2})(?:\s|$)')
         all_matches_raw = list(pattern.finditer(text_section))
-        
-        # 1. Filtrar metadados específicos do PDF do Itaú
+
+        # Filtra metadados: MAIÚSCULAS + ESPAÇO + PONTO + cidade
         all_matches = []
         for match in all_matches_raw:
             desc = match.group(2).strip().upper()
-            if re.match(r'^[A-ZÀ-Ÿ\s]+\s\.[A-ZÀ-Ÿ\s]+$', desc):
+            if re.match(r'^[A-ZÀ-Ÿ\s]+\s\.[A-Za-zÀ-Ÿ\s]+$', desc):
                 continue
             all_matches.append(match)
-        
+
         transaction_index_after_compras = 0
         first_transaction_after_compras_idx = None
-        
-        # 2. Processar matches
+        seen = {}
+
         for match in all_matches:
             date = match.group(1)
-            desc = match.group(2).strip().upper() # Forçar MAIÚSCULAS
+            desc = match.group(2).strip().upper()
             value_str = match.group(3)
-            
+
             if not desc or len(desc) < 2:
                 continue
-            
+            if not re.search(r'[A-Za-z0-9]', desc):
+                continue
+
             try:
                 value = float(value_str.replace(".", "").replace(",", "."))
             except ValueError:
                 continue
-            
-            # Tratar cancelamentos (Itaú coloca "-" no fim da descrição)
+
             if desc.endswith("-"):
                 value = -value
                 desc = desc.rstrip("-").strip()
-            
-            # 3. Lógica Especial Itaú: Filtro de parcelados (regra x+3n)
-            # Esta lógica é mantida aqui pois é estrutural do PDF do Itaú
-            rel_start = match.start()
+
+            # Lógica x+3n para parceladas
             c_parc_rel = compras_parceladas_pos - lancamentos_pos if compras_parceladas_pos >= 0 else -1
             p_fat_rel = proxima_fatura_pos - lancamentos_pos if proxima_fatura_pos >= 0 else -1
-            
-            is_between = (c_parc_rel >= 0 and p_fat_rel >= 0 and 
-                          rel_start >= c_parc_rel and rel_start < p_fat_rel)
-            
+
+            is_between = (
+                c_parc_rel >= 0 and p_fat_rel >= 0 and
+                match.start() >= c_parc_rel and match.start() < p_fat_rel
+            )
+
             if is_between:
                 if first_transaction_after_compras_idx is None:
                     first_transaction_after_compras_idx = transaction_index_after_compras
-                
                 idx_rel = transaction_index_after_compras - first_transaction_after_compras_idx
                 transaction_index_after_compras += 1
-                
                 if idx_rel % 3 != 0:
                     continue
 
-            # 4. Adicionar à lista final (Dados Brutos)
-            transactions.append({
-                "data": date,
-                "descricao": desc,
-                "valor": value,
-                "categoria": "Sem categoria" # Router aplica o JSON depois
-            })
-            
+            key = (date, ' '.join(desc.split()), value)
+            if key not in seen:
+                seen[key] = True
+                transactions.append({
+                    "data": date,
+                    "descricao": desc,
+                    "valor": value,
+                    "categoria": "Sem categoria"
+                })
+
     except Exception as e:
         print(f"Erro no parser Itaú: {e}")
-    
+
     return transactions
