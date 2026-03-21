@@ -144,7 +144,7 @@ try:
         
         st.dataframe(
             df_recent, 
-            width='stretch', 
+            use_container_width=True, 
             hide_index=True,
             column_config={
                 "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),

@@ -120,7 +120,7 @@ df_para_editar = df_para_editar[cols]
 df_editado_raw = st.data_editor(
     df_para_editar,
     key="editor_v32", 
-    width='stretch',
+    use_container_width=True,
     num_rows="dynamic",
     column_config={
         "id": None, 
