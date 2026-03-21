@@ -1,6 +1,7 @@
 import fitz
 import re
 
+MINUS = '\u2212'  # sinal − do Nubank (diferente do hífen comum -)
 
 def ajustar_data_compra(dia, mes_fatura, ano_fatura, inicio_ciclo=20):
     if dia >= inicio_ciclo:
@@ -16,14 +17,8 @@ def ajustar_data_compra(dia, mes_fatura, ano_fatura, inicio_ciclo=20):
 
 
 def extrair_linhas_por_coordenada(page, tolerancia=1.0):
-    """
-    Extrai spans via get_text("dict") e reconstrói linhas agrupando por
-    range Y acumulado. O '01 FEV' tem top 0.4px maior que os demais spans
-    da mesma linha — por isso usamos y_max + tolerancia em vez de bucketing.
-    """
     data = page.get_text("dict")
     spans = []
-
     for block in data.get("blocks", []):
         for line in block.get("lines", []):
             for span in line.get("spans", []):
@@ -35,12 +30,10 @@ def extrair_linhas_por_coordenada(page, tolerancia=1.0):
                     "x0": span["bbox"][0],
                     "top": span["bbox"][1]
                 })
-
     if not spans:
         return []
 
     spans.sort(key=lambda s: s["top"])
-
     linhas = []
     linha_atual = [spans[0]]
     y_max = spans[0]["top"]
@@ -88,7 +81,10 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
         text_section = text_all[trans_pos:fim_pos]
 
         re_pos = re.compile(r'^(\d{2})\s+(\w{3})\s+(.+?)\s+R\$\s+(\d{1,3}(?:\.\d{3})*,\d{2})$')
-        re_neg = re.compile(r'^(\d{2})\s+(\w{3})\s+(.+?)\s+\u2212R\$\s+(\d{1,3}(?:\.\d{3})*,\d{2})$')
+        # Usa variável para o caractere − (U+2212) — raw string não interpreta \u
+        re_neg = re.compile(
+            r'^(\d{2})\s+(\w{3})\s+(.+?)\s+[' + MINUS + r'\-]R\$\s+(\d{1,3}(?:\.\d{3})*,\d{2})$'
+        )
 
         for line in text_section.split("\n"):
             line = line.strip()
