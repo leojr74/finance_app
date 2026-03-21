@@ -123,7 +123,7 @@ def normalizar_transacoes(raw_transactions, data_inicio, data_fim):
 def extract_transactions_auto(pdf_path, data_inicio, data_fim):
 
     bank = bank_detector.detect_bank(pdf_path)
-
+    print(f"DEBUG banco detectado: {repr(bank)}")  # ADD THIS
     if not bank:
         raise ValueError("Banco não detectado")
 
