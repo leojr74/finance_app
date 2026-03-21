@@ -136,7 +136,11 @@ def extract_transactions_auto(pdf_path, data_inicio, data_fim):
     ano_fatura = data_fim.year
 
     raw_transactions = parser(pdf_path, mes_fatura, ano_fatura)
-
+    print(f"DEBUG raw_transactions count: {len(raw_transactions)}")
+    if raw_transactions:
+        print(f"DEBUG primeira: {raw_transactions[0]}")
+    else:
+        print("DEBUG parser retornou lista vazia")
     transactions = normalizar_transacoes(
         raw_transactions,
         data_inicio,
