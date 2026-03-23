@@ -4,12 +4,12 @@ cookie:
   name: finance_cookie
 credentials:
   usernames:
-      leojr74:
+    leojr74:
       email: leonardo.jlpj@gmail.com
       failed_login_attempts: 0
       first_name: JOSE
       last_name: JUNIOR
-      logged_in: true
-      password: $2b$12$MH.Hkhk1/ffCAfXTlNqBXOYVdOMyZDOogXSxBo7fGeRnJK5KiABBe
+      logged_in: false
+      password: "$2b$12$MH.Hkhk1/ffCAfXTlNqBXOYVdOMyZDOogXSxBo7fGeRnJK5KiABBe"
       password_hint: de sempre
       roles: null

@@ -1,5 +1,6 @@
 import streamlit as st
 import streamlit_authenticator as stauth
+import os
 import yaml
 from yaml.loader import SafeLoader
 from ui import apply_global_style
@@ -12,10 +13,15 @@ st.set_page_config(
     layout="wide"
 )
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(BASE_DIR, 'config.yaml')
+
+
+
 # --- CARREGAR CONFIGURAÇÕES ---
 try:
-    with open('config.yaml', 'r', encoding='utf-8') as file:
-        config = yaml.load(file, Loader=SafeLoader)
+    with open(config_path) as file:
+        config = yaml.load(file, Loader=yaml.SafeLoader)
 except Exception as e:
     st.error(f"Erro ao carregar config.yaml: {e}")
     st.stop()
