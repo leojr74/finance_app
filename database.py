@@ -97,13 +97,20 @@ def salvar_config_categoria(categoria, is_fixo):
         conn.commit()
 
 def get_gastos_fixos():
-    with conectar() as conn:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT categoria FROM config_categorias WHERE is_fixo = 1")
-            return [row[0] for row in cursor.fetchall()]
-        except:
-            return []
+    conn = conectar()
+    if conn is None:
+        return [] # Retorna lista vazia se não houver conexão
+        
+    try:
+        with conn: # O 'with' deve ser usado na conexão já existente
+            with conn.cursor() as cur:
+                cur.execute("SELECT categoria FROM orcamentos WHERE fixo = True")
+                return [row[0] for row in cur.fetchall()]
+    except Exception as e:
+        print(f"Erro ao buscar fixos: {e}")
+        return []
+    finally:
+        conn.close()
 
 # --- CARREGAMENTO ---
 def carregar_transacoes(dias=None):
