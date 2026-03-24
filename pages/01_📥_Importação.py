@@ -2,11 +2,17 @@ import streamlit as st
 import pandas as pd
 import hashlib
 import os
-import psycopg2
 import tempfile
 from datetime import date
 from ui import apply_global_style
 from database import conectar
+
+# --- PROTEÇÃO DE ACESSO ---
+if not st.session_state.get("authentication_status"):
+    st.warning("Por favor, faça login na Home para acessar esta página.")
+    st.stop()
+
+usuario_atual = st.session_state["username"]
 
 apply_global_style()
 
@@ -50,17 +56,15 @@ if uploaded:
         if result and "transactions" in result:
             df = pd.DataFrame(result["transactions"])
             
-            # Normalização para garantir que cálculos e exibições funcionem
+            # Normalização
             df["data"] = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
             df["descricao"] = df["descricao"].astype(str).str.upper()
             
             df = df.sort_values("data").reset_index(drop=True)
-            
-            # Guardamos no state para o botão "Salvar" ter acesso aos dados
             st.session_state.df_transacoes = df
 
-            # Identificação do Banco para exibição
+            # Identificação do Banco
             id_tecnico = str(result.get("bank", "DESCONHECIDO")).lower()
             mapeamento_nomes = {
                 "ca": "CARTÃO C&A",
@@ -75,12 +79,11 @@ if uploaded:
             }
             banco_nome = mapeamento_nomes.get(id_tecnico, id_tecnico.upper())
 
-            # --- EXIBIÇÃO DOS RESULTADOS ---
             st.success(f"✅ {len(df)} transações extraídas de: **{banco_nome}**")
 
             st.dataframe(
                 df[["data", "descricao", "valor"]], 
-                use_container_width=True, 
+                width = 'stretch', 
                 hide_index=True,
                 column_config={
                     "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
@@ -89,25 +92,28 @@ if uploaded:
                 }
             )
 
-            # --- O SOMATÓRIO QUE VOCÊ SOLICITOU ---
             total_fatura = df["valor"].sum()
             st.metric(label="Total Extraído", value=f"R$ {total_fatura:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-            st.info("💡 Verifique se o valor acima coincide com o total da sua fatura PDF.")
 
-            # Hash para evitar duplicidade de importação da mesma fatura
+            # Hash da fatura
             hash_base = f"{banco_nome}_{data_inicio}_{data_fim}"
             hash_fatura = hashlib.sha256(hash_base.encode()).hexdigest()
 
             # --------------------------------------------------
-            # Botão salvar
+            # Botão salvar (MODIFICADO PARA USER_ID)
             # --------------------------------------------------
             if st.button("💾 Salvar no banco"):
                 try:
                     conn = conectar()
+                    if not conn:
+                        st.error("Não foi possível conectar ao banco.")
+                        st.stop()
+                    
                     cursor = conn.cursor()
                     
-                    # Busca histórico para checar duplicados
-                    df_h = pd.read_sql_query("SELECT data, valor, banco, hash_fatura, descricao FROM transacoes", conn)
+                    # BUSCA APENAS O HISTÓRICO DESTE USUÁRIO
+                    query_h = "SELECT data, valor, banco, hash_fatura, descricao FROM transacoes WHERE user_id = %s"
+                    df_h = pd.read_sql_query(query_h, conn, params=(usuario_atual,))
                     
                     if not df_h.empty:
                         df_h['data'] = pd.to_datetime(df_h['data']).dt.date
@@ -117,13 +123,12 @@ if uploaded:
                     inseridas = 0
                     ignoradas_manual = 0
                     
-                    # Processa cada linha do dataframe armazenado no state
                     for _, row in st.session_state.df_transacoes.iterrows():
                         t_data = row['data'].date()
                         t_valor = round(float(row['valor']), 2)
                         t_desc = str(row['descricao'])
                         
-                        # Filtro contra lançamentos manuais já existentes (Evita duplicar o que você já lançou)
+                        # Filtro contra lançamentos manuais DESTE usuário
                         if not df_h.empty:
                             conflito_manual = df_h[
                                 (df_h['data'] == t_data) & 
@@ -136,19 +141,19 @@ if uploaded:
                                 ignoradas_manual += 1
                                 continue
 
+                        # INSERÇÃO INCLUINDO O USER_ID
                         cursor.execute("""
-                            INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                        """, (t_data, t_desc, t_valor, row.get("categoria", "Sem categoria"), banco_nome, hash_fatura))
+                            INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura, user_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        """, (t_data, t_desc, t_valor, row.get("categoria", "Sem categoria"), banco_nome, hash_fatura, usuario_atual))
                         inseridas += 1
 
                     conn.commit()
-                    st.success(f"✅ {inseridas} transações salvas com sucesso!")
+                    st.success(f"✅ {inseridas} transações salvas para {usuario_atual}!")
                     
                     if ignoradas_manual > 0:
                         st.warning(f"📌 {ignoradas_manual} transações ignoradas por já existirem no lançamento manual.")
                     
-                    # Limpa o state para a próxima importação
                     del st.session_state.df_transacoes
                     
                 except Exception as e:
@@ -160,5 +165,5 @@ if uploaded:
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
     finally:
-        if os.path.exists(tmp_path):
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
             os.remove(tmp_path)

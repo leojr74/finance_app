@@ -6,6 +6,13 @@ from database import carregar_transacoes, get_gastos_fixos
 from ui import apply_global_style
 from categorizer import load_categories
 
+# --- PROTEÇÃO DE ACESSO E USUÁRIO ---
+if not st.session_state.get("authentication_status"):
+    st.warning("Por favor, faça login na Home para acessar esta página.")
+    st.stop()
+
+usuario_atual = st.session_state["username"]
+
 # 1. CONFIGURAÇÃO E ESTILO
 apply_global_style()
 
@@ -14,10 +21,10 @@ def formatar(valor):
 
 st.title("📈 Dashboard Financeiro")
 
-# 2. CARREGAMENTO E LIMPEZA
-df = carregar_transacoes()
+# 2. CARREGAMENTO E LIMPEZA (FILTRADO POR USUÁRIO)
+df = carregar_transacoes(usuario_atual)
 if df is None or df.empty:
-    st.warning("⚠️ Nenhuma transação encontrada.")
+    st.warning(f"⚠️ Nenhuma transação encontrada para {usuario_atual}.")
     st.stop()
 
 # Conversão de tipos
@@ -66,10 +73,11 @@ with c1:
 if isinstance(periodo, tuple) and len(periodo) == 2:
     df_filtrado = df[(df["data"].dt.date >= periodo[0]) & (df["data"].dt.date <= periodo[1])].copy()
 else:
-    df_filtrado = df[df["data"].dt.date == periodo].copy()
+    # Se o usuário selecionar apenas um dia (clique simples no calendário)
+    df_filtrado = df[df["data"].dt.date == (periodo[0] if isinstance(periodo, list) else periodo)].copy()
 
-# 6. MÉTRICAS
-CATEGORIAS_FIXAS_DB = get_gastos_fixos()
+# 6. MÉTRICAS (COM PREFERÊNCIAS DO USUÁRIO)
+CATEGORIAS_FIXAS_DB = get_gastos_fixos(usuario_atual)
 
 st.write("---")
 m1, m2, m3 = st.columns(3)
@@ -96,7 +104,7 @@ with col_esq:
         color=alt.Color(field="categoria", type="nominal", scale=alt.Scale(scheme='tableau10')),
         tooltip=[alt.Tooltip("categoria"), alt.Tooltip("valor", format=",.2f")]
     ).properties(height=400)
-    st.altair_chart(pizza, use_container_width=True)
+    st.altair_chart(pizza, width = 'stretch')
 
 with col_dir:
     st.subheader("📊 Maiores Gastos")
@@ -107,7 +115,7 @@ with col_dir:
         color=alt.Color("categoria:N", legend=None, scale=alt.Scale(scheme='tableau10')),
         tooltip=[alt.Tooltip("categoria"), alt.Tooltip("valor", format=",.2f")]
     ).properties(height=400)
-    st.altair_chart(barras, use_container_width=True)
+    st.altair_chart(barras, width = 'stretch')
 
 st.write("---")
-st.caption("v2.5 | Dashboard Dinâmico (Últimos 30 dias)")
+st.caption(f"v2.5 | Dashboard para {st.session_state['name']} | Dados filtrados por user_id: {usuario_atual}")

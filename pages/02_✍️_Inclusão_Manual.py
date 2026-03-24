@@ -1,26 +1,36 @@
 import streamlit as st
-import psycopg2
 import pandas as pd
 from datetime import date
 from categorizer import load_categories, find_category
 from ui import apply_global_style
 from database import conectar
 
+# --- PROTEÇÃO DE ACESSO E DEFINIÇÃO DE USUÁRIO ---
+if not st.session_state.get("authentication_status"):
+    st.warning("Por favor, faça login na Home para acessar esta página.")
+    st.stop()
+
+usuario_atual = st.session_state["username"]
+
 apply_global_style()
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-
 st.title("✍️ Inclusão Manual")
-st.markdown("Registre gastos em dinheiro, Pix ou outras transações manuais.")
+st.markdown(f"Registre gastos para a conta de **{st.session_state['name']}**.")
 
 # --- 1. CARREGAMENTO DE OPÇÕES (BANCOS E CATEGORIAS) ---
 rules = load_categories()
 
-# Busca bancos existentes no banco de dados
+# Busca bancos existentes no banco de dados FILTRADOS pelo usuário
 try:
     conn = conectar()
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT banco FROM transacoes WHERE banco IS NOT NULL AND banco != ''")
+    # Adicionado filtro de user_id para não sugerir bancos de terceiros
+    cursor.execute("""
+        SELECT DISTINCT banco 
+        FROM transacoes 
+        WHERE banco IS NOT NULL AND banco != '' AND user_id = %s
+    """, (usuario_atual,))
     bancos_no_db = [row[0] for row in cursor.fetchall()]
     conn.close()
 except:
@@ -31,10 +41,13 @@ opcoes_banco = sorted(list(set(bancos_no_db))) + ["➕ Adicionar novo banco..."]
 
 # Categorias (Unindo fixas + JSON)
 categorias_fixas = {"Alimentação", "Transporte", "Saúde", "Lazer", "Moradia", "Supermercado", "Sem categoria"}
-cats_do_json = set(str(v) for v in rules.values() if v)
+try:
+    cats_do_json = set(str(v) for v in rules.values() if v)
+except:
+    cats_do_json = set()
 lista_categorias = sorted(cats_do_json.union(categorias_fixas))
 
-# --- 2. SELEÇÃO DE BANCO (FORA DO FORM PARA REATIVIDADE) ---
+# --- 2. SELEÇÃO DE BANCO ---
 st.subheader("🏦 Origem da Transação")
 c_b1, c_b2 = st.columns([1, 1])
 
@@ -44,7 +57,7 @@ with c_b1:
 novo_banco_nome = ""
 if banco_sel == "➕ Adicionar novo banco...":
     with c_b2:
-        novo_banco_nome = st.text_input("Nome do novo banco:", placeholder="Ex: INTER, XP, DINHEIRO...").upper().strip()
+        novo_banco_nome = st.text_input("Nome do novo banco:", placeholder="Ex: DINHEIRO, PIX...").upper().strip()
 
 # --- 3. FORMULÁRIO DE DETALHES DA TRANSAÇÃO ---
 st.write("---")
@@ -61,34 +74,29 @@ with st.container(border=True):
         with col2:
             desc_ins = st.text_input("Descrição (Ex: Padaria da Esquina)").upper().strip()
             
-            # 1. PROTEÇÃO: Só tenta buscar categoria se houver texto
             cat_sugerida = find_category(desc_ins, rules) if desc_ins else "Sem categoria"
             
-            # Garante que a sugerida esteja na lista
             if cat_sugerida not in lista_categorias:
                 lista_categorias.append(cat_sugerida)
                 lista_categorias.sort()
 
-            # 2. PROTEÇÃO: Cálculo de índice seguro para evitar o erro de milissegundos
             try:
                 index_atual = lista_categorias.index(cat_sugerida)
             except (ValueError, KeyError):
-                index_atual = 0 # Caso a categoria suma da lista por um instante, volta ao início
+                index_atual = 0
 
             categoria_ins = st.selectbox(
                 "Categoria", 
                 options=lista_categorias, 
-                index=index_atual # Usa o índice seguro calculado acima
+                index=index_atual
             )
 
         submit = st.form_submit_button("💾 Salvar Transação", type="primary")
 
 # --- 4. LÓGICA DE SALVAMENTO ---
 if submit:
-    # Define qual nome de banco usar
     banco_final = novo_banco_nome if banco_sel == "➕ Adicionar novo banco..." else banco_sel
     
-    # Validações básicas
     if not desc_ins or valor_ins <= 0:
         st.error("❌ Preencha a descrição e um valor maior que zero.")
     elif banco_sel == "➕ Adicionar novo banco..." and not novo_banco_nome:
@@ -98,64 +106,59 @@ if submit:
             conn = conectar()
             cursor = conn.cursor()
             
+            # INSERÇÃO INCLUINDO O USER_ID
             cursor.execute("""
-                INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura, user_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 data_ins.strftime("%Y-%m-%d"),
                 desc_ins,
                 valor_ins,
                 categoria_ins,
                 banco_final,
-                "MANUAL_ENTRY"
+                "MANUAL_ENTRY",
+                usuario_atual
             ))
             
             conn.commit()
             conn.close()
             
-            # Limpa cache do session_state para as outras páginas
             if "df_transacoes" in st.session_state:
                 del st.session_state.df_transacoes
             
-            st.success(f"✅ Transação '{desc_ins}' salva com sucesso!")
-            st.rerun() # Recarrega para limpar campos e atualizar lista de bancos
+            st.success(f"✅ Transação salva com sucesso!")
+            st.rerun()
             
         except Exception as e:
             st.error(f"⚠️ Erro ao acessar o banco de dados: {e}")
 
 # --- 5. VISUALIZAÇÃO DOS ÚLTIMOS LANÇAMENTOS ---
 st.write("---")
-st.subheader("📋 Últimos Lançamentos Manuais")
+st.subheader("📋 Seus Últimos Lançamentos Manuais")
 
 try:
     conn = conectar()
-    # Nota: Verifique se no seu INSERT você está usando 'MANUAL_ENTRY' ou 'MANUAL'
+    # FILTRO: Apenas transações manuais DESTE usuário
     df_recent = pd.read_sql_query("""
         SELECT data, descricao, valor, categoria, banco 
         FROM transacoes 
-        WHERE hash_fatura = 'MANUAL_ENTRY'
+        WHERE hash_fatura = 'MANUAL_ENTRY' AND user_id = %s
         ORDER BY id DESC LIMIT 5
-    """, conn)
+    """, conn, params=(usuario_atual,))
     conn.close()
     
     if not df_recent.empty:
-        # Garantimos que a data seja tratada como objeto de data para o formatador do Streamlit
         df_recent["data"] = pd.to_datetime(df_recent["data"])
-        
         st.dataframe(
             df_recent, 
-            use_container_width=True, 
+            width = 'stretch', 
             hide_index=True,
             column_config={
                 "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                "descricao": "Descrição",  # Ajuste do cabeçalho
                 "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f"),
-                "categoria": "Categoria",
-                "banco": "Banco/Cartão"
             }
         )
     else:
-        st.info("Nenhuma transação manual encontrada até o momento.")
+        st.info("Nenhuma transação manual encontrada para o seu usuário.")
 except Exception as e:
-    # Mostramos o aviso, mas sem travar o app
     st.warning("Não foi possível carregar o histórico recente.")

@@ -1,187 +1,228 @@
-import streamlit as st
 import psycopg2
-import os
-import hashlib
 import pandas as pd
+import streamlit as st
 from datetime import datetime, timedelta
 
-import psycopg2
-import streamlit as st
-
 def conectar():
+    """Estabelece conexão com o Supabase usando st.secrets."""
     try:
-        # Puxa a URL que você configurou nos Secrets
-        conn_url = st.secrets["DATABASE_URL"]
-        
-        # Conectamos com um tempo de limite para não travar o app se o banco demorar
-        return psycopg2.connect(conn_url, connect_timeout=10)
+        if "postgres" in st.secrets:
+            conn_url = st.secrets["postgres"]["url"]
+            return psycopg2.connect(conn_url)
+        else:
+            st.error("Configuração 'postgres' não encontrada nas Secrets.")
+            return None
     except Exception as e:
         st.error(f"Erro ao conectar ao Supabase: {e}")
         return None
 
 def criar_tabela():
+    """Cria ou atualiza a estrutura das tabelas no Supabase."""
     conn = conectar()
-    if conn is None:
-        return
-
+    if not conn: return
     try:
         with conn.cursor() as cursor:
-            # TABELA TRANSACOES: Trocamos INTEGER PRIMARY KEY AUTOINCREMENT por SERIAL PRIMARY KEY
+            # Transações
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS transacoes (
                     id SERIAL PRIMARY KEY,
-                    data DATE, 
-                    descricao TEXT, 
-                    valor DECIMAL,
-                    categoria TEXT, 
-                    banco TEXT, 
-                    hash_fatura TEXT
+                    data DATE,
+                    descricao TEXT,
+                    valor NUMERIC,
+                    categoria TEXT,
+                    banco TEXT,
+                    hash_fatura TEXT,
+                    user_id TEXT
                 )
             ''')
-            
-            # TABELA ORCAMENTOS: Trocamos REAL por DECIMAL e AUTOINCREMENT por SERIAL
+            # Orçamentos
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS orcamentos (
                     id SERIAL PRIMARY KEY,
-                    categoria TEXT, 
-                    valor DECIMAL, 
-                    mes INTEGER, 
+                    categoria TEXT,
+                    valor NUMERIC,
+                    mes INTEGER,
                     ano INTEGER,
-                    UNIQUE(categoria, mes, ano)
+                    user_id TEXT
                 )
             ''')
-            
-            # TABELA CONFIGURACOES
+            # Categorias Fixas (Configuração)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS config_categorias (
-                    categoria TEXT PRIMARY KEY,
-                    is_fixo INTEGER DEFAULT 0
+                    categoria TEXT,
+                    is_fixo BOOLEAN,
+                    user_id TEXT,
+                    PRIMARY KEY (categoria, user_id)
                 )
             ''')
             conn.commit()
-    except Exception as e:
-        st.error(f"Erro ao criar tabelas no Supabase: {e}")
     finally:
         conn.close()
 
-# --- COMPATIBILIDADE ---
-def criar_tabela_orcamentos():
-    criar_tabela()
+# --- SEÇÃO DE TRANSAÇÕES ---
 
-def gerar_hash_fatura(banco, mes, ano):
-    texto = f"{banco}_{mes}_{ano}"
-    return hashlib.sha256(texto.encode()).hexdigest()
-
-# --- GESTÃO DINÂMICA DE CATEGORIAS ---
-def get_categorias_completas():
-    """Retorna categorias padrão + categorias encontradas no banco de dados."""
-    padrao = ["Alimentação", "Assinaturas", "Lazer", "Moradia", "Saúde", "Supermercado", "Transporte", "Viagem", "Outros", "Sem categoria"]
-    try:
-        with conectar() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT categoria FROM transacoes WHERE categoria IS NOT NULL")
-            do_banco = [row[0] for row in cursor.fetchall()]
-        todas = list(set(padrao + do_banco))
-        return sorted([c for c in todas if c and c != "None"])
-    except:
-        return sorted(padrao)
-
-def salvar_config_categoria(categoria, is_fixo):
-    with conectar() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO config_categorias (categoria, is_fixo)
-            VALUES (%s, %s)
-            ON CONFLICT(categoria) DO UPDATE SET is_fixo = excluded.is_fixo
-        ''', (categoria, 1 if is_fixo else 0))
-        conn.commit()
-
-def get_gastos_fixos():
+def salvar_transacoes(df, user_id):
     conn = conectar()
-    if conn is None:
-        return [] # Retorna lista vazia se não houver conexão
-        
+    if not conn: return
     try:
-        with conn: # O 'with' deve ser usado na conexão já existente
-            with conn.cursor() as cur:
-                cur.execute("SELECT categoria FROM orcamentos WHERE fixo = True")
-                return [row[0] for row in cur.fetchall()]
-    except Exception as e:
-        print(f"Erro ao buscar fixos: {e}")
-        return []
+        with conn.cursor() as cursor:
+            for _, row in df.iterrows():
+                cursor.execute("SELECT 1 FROM transacoes WHERE hash_fatura = %s AND user_id = %s", 
+                               (row['hash_fatura'], user_id))
+                if not cursor.fetchone():
+                    query = '''
+                        INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura, user_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    '''
+                    cursor.execute(query, (row['data'], row['descricao'], row['valor'], 
+                                         row['categoria'], row['banco'], row['hash_fatura'], user_id))
+            conn.commit()
     finally:
         conn.close()
 
-# --- CARREGAMENTO ---
-def carregar_transacoes(dias=None):
+def save_all_changes(df, user_id):
+    """Sincroniza edições em massa do st.data_editor."""
+    conn = conectar()
+    if not conn: return
+    try:
+        with conn.cursor() as cursor:
+            for _, row in df.iterrows():
+                query = '''
+                    UPDATE transacoes 
+                    SET categoria = %s, valor = %s, data = %s 
+                    WHERE id = %s AND user_id = %s
+                '''
+                cursor.execute(query, (row['categoria'], row['valor'], row['data'], row['id'], user_id))
+            conn.commit()
+    finally:
+        conn.close()
+
+def carregar_transacoes(user_id, dias=None):
     conn = conectar()
     if not conn: return pd.DataFrame()
-    
     try:
         if dias:
             data_corte = (datetime.now() - timedelta(days=dias)).date()
-            # No Postgres, usamos %s para passar parâmetros, mesmo no read_sql
-            query = "SELECT * FROM transacoes WHERE data >= %s ORDER BY data DESC"
-            return pd.read_sql_query(query, conn, params=(data_corte,))
+            query = "SELECT * FROM transacoes WHERE user_id = %s AND data >= %s ORDER BY data DESC"
+            params = (user_id, data_corte)
         else:
-            query = "SELECT * FROM transacoes ORDER BY data DESC"
-            return pd.read_sql_query(query, conn)
+            query = "SELECT * FROM transacoes WHERE user_id = %s ORDER BY data DESC"
+            params = (user_id,)
+        
+        df = pd.read_sql_query(query, conn, params=params)
+        if not df.empty:
+            df['data'] = pd.to_datetime(df['data'])
+        return df
     finally:
         conn.close()
 
-def salvar_orcamento(categoria, valor, mes, ano):
-    with conectar() as conn:
-        cursor = conn.cursor()
-        
-        # Garante que a regra de unicidade existe (previne o erro OperationalError)
-        cursor.execute('''
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_orcamento_unico 
-            ON orcamentos(categoria, mes, ano)
-        ''')
-        
-        # Agora o ON CONFLICT vai encontrar o alvo correto
-        cursor.execute('''
-            INSERT INTO orcamentos (categoria, valor, mes, ano)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT(categoria, mes, ano) DO UPDATE SET valor = excluded.valor
-        ''', (categoria, valor, mes, ano))
-        conn.commit()
+def verificar_duplicata(hash_fatura, user_id):
+    conn = conectar()
+    if not conn: return False
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM transacoes WHERE hash_fatura = %s AND user_id = %s", (hash_fatura, user_id))
+            return cursor.fetchone() is not None
+    finally:
+        conn.close()
 
-def carregar_orcamentos(mes, ano):
-    with conectar() as conn:
-        return pd.read_sql_query("SELECT categoria, valor FROM orcamentos WHERE mes = %s AND ano = %s", 
-                                 conn, params=(mes, ano))
-    
-def save_all_changes(df):
-    """Sincroniza o banco de dados com o estado atual do editor (Update e Delete)."""
-    with conectar() as conn:
-        if conn is None:
-            return
-            
-        try:
-            cursor = conn.cursor()
-            
-            # 1. Obter a lista de IDs que ainda existem no seu DataFrame
-            ids_presentes = df['id'].tolist()
-            
-            # 2. DELETAR o que não está mais no DataFrame
-            # Se a lista não estiver vazia, deletamos quem sumiu. 
-            # Se estiver vazia, significa que você apagou tudo no editor.
-            if ids_presentes:
-                # O formato %s com uma tupla é a forma correta do psycopg2 para o "IN"
-                cursor.execute("DELETE FROM transacoes WHERE id NOT IN %s", (tuple(ids_presentes),))
-            else:
-                cursor.execute("DELETE FROM transacoes")
-
-            # 3. ATUALIZAR as categorias de quem sobrou
-            for _, row in df.iterrows():
-                cursor.execute('''
-                    UPDATE transacoes 
-                    SET categoria = %s 
-                    WHERE id = %s
-                ''', (row['categoria'], row['id']))
-            
+def deletar_transacao(id_transacao, user_id):
+    conn = conectar()
+    if not conn: return
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM transacoes WHERE id = %s AND user_id = %s", (id_transacao, user_id))
             conn.commit()
-        except Exception as e:
-            conn.rollback()
-            st.error(f"Erro ao salvar alterações no banco: {e}")
+    finally:
+        conn.close()
+
+# --- SEÇÃO DE CATEGORIAS E CONFIGURAÇÕES ---
+
+def get_categorias_completas(user_id):
+    conn = conectar()
+    if not conn: return []
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT DISTINCT categoria FROM transacoes WHERE user_id = %s", (user_id,))
+            cats_trans = [row[0] for row in cursor.fetchall() if row[0]]
+            cursor.execute("SELECT DISTINCT categoria FROM config_categorias WHERE user_id = %s", (user_id,))
+            cats_config = [row[0] for row in cursor.fetchall() if row[0]]
+            
+            padrao = {"Alimentação", "Transporte", "Lazer", "Moradia", "Saúde", "Supermercado", "Sem categoria"}
+            todas = sorted(list(set(cats_trans) | set(cats_config) | padrao))
+            return todas
+    finally:
+        conn.close()
+
+def salvar_config_categoria(categoria, is_fixo, user_id):
+    conn = conectar()
+    if not conn: return
+    try:
+        with conn.cursor() as cursor:
+            query = '''
+                INSERT INTO config_categorias (categoria, is_fixo, user_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (categoria, user_id) 
+                DO UPDATE SET is_fixo = EXCLUDED.is_fixo
+            '''
+            cursor.execute(query, (categoria, bool(is_fixo), user_id))
+            conn.commit()
+    finally:
+        conn.close()
+
+def get_gastos_fixos(user_id):
+    conn = conectar()
+    if not conn: return []
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT categoria FROM config_categorias WHERE user_id = %s AND is_fixo = TRUE", (user_id,))
+            return [row[0] for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+# --- SEÇÃO DE ORÇAMENTO ---
+
+def salvar_orcamento(categoria, valor, mes, ano, user_id):
+    conn = conectar()
+    if not conn: return
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                SELECT id FROM orcamentos 
+                WHERE categoria = %s AND mes = %s AND ano = %s AND user_id = %s
+            ''', (categoria, mes, ano, user_id))
+            
+            row = cursor.fetchone()
+            if row:
+                cursor.execute("UPDATE orcamentos SET valor = %s WHERE id = %s", (valor, row[0]))
+            else:
+                cursor.execute('''
+                    INSERT INTO orcamentos (categoria, valor, mes, ano, user_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                ''', (categoria, valor, mes, ano, user_id))
+            conn.commit()
+    finally:
+        conn.close()
+
+def carregar_orcamentos(mes, ano, user_id):
+    conn = conectar()
+    if not conn: return pd.DataFrame()
+    try:
+        query = "SELECT * FROM orcamentos WHERE user_id = %s AND mes = %s AND ano = %s"
+        return pd.read_sql_query(query, conn, params=(user_id, mes, ano))
+    finally:
+        conn.close()
+
+# --- UTILITÁRIOS ---
+
+def limpar_banco_usuario(user_id):
+    conn = conectar()
+    if not conn: return
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM transacoes WHERE user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM orcamentos WHERE user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM config_categorias WHERE user_id = %s", (user_id,))
+            conn.commit()
+    finally:
+        conn.close()

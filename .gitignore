@@ -69,3 +69,5 @@ tmp/
 temp/
 
 *.bat
+
+.streamlit/

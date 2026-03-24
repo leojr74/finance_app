@@ -105,6 +105,9 @@ if st.session_state.get("authentication_status"):
         st.subheader("Definição de Gastos Fixos")
         st.markdown("Marque as categorias que representam custos recorrentes:")
 
+        # Identificador do usuário logado (usamos o username do config.yaml)
+        usuario_atual = st.session_state["username"]
+
         categorias_base = {"Alimentação", "Transporte", "Saúde", "Lazer", "Moradia", "Supermercado"}
 
         try:
@@ -121,21 +124,21 @@ if st.session_state.get("authentication_status"):
             if cat and str(cat).strip() not in termos_proibidos
         ])
 
-        fixas_atuais = get_gastos_fixos()
+        # CORREÇÃO: Passando o usuario_atual para carregar apenas as configurações DELE
+        fixas_atuais = get_gastos_fixos(usuario_atual)
 
         if todas_as_categorias:
-            mudancas = {}
             cols_fixos = st.columns(4)
             for i, cat in enumerate(todas_as_categorias):
                 with cols_fixos[i % 4]:
+                    # Usamos um checkbox para cada categoria
                     checado = st.checkbox(cat, value=(cat in fixas_atuais), key=f"cfg_{cat}")
+                    
+                    # Verificação de mudança: Se o estado do checkbox mudou em relação ao banco
                     if checado != (cat in fixas_atuais):
-                        mudancas[cat] = checado
-
-            if mudancas:
-                for cat, valor in mudancas.items():
-                    salvar_config_categoria(cat, valor)
-                st.rerun()
+                        # CORREÇÃO: Passando os 3 argumentos: categoria, booleano e user_id
+                        salvar_config_categoria(cat, checado, usuario_atual)
+                        st.rerun() # Reinicia para atualizar a lista 'fixas_atuais'
         else:
             st.info("Nenhuma categoria encontrada.")
 
