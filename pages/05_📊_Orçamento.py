@@ -5,21 +5,22 @@ import altair as alt
 from database import (
     carregar_transacoes,
     criar_tabela,
+    get_authenticator,
     salvar_orcamento,
     get_gastos_fixos,
     carregar_orcamentos
 )
 from ui import apply_global_style
 
-# --- PROTEÇÃO DE ACESSO E USUÁRIO ---
+authenticator = get_authenticator()
+authenticator.login(location='unrendered') 
+
 if not st.session_state.get("authentication_status"):
-    st.warning("Por favor, faça login na Home para acessar esta página.")
+    st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 
-usuario_atual = st.session_state["username"]
-
+usuario_atual = st.session_state["username"] 
 apply_global_style()
-
 st.title("📊 Planejamento de Orçamento")
 
 # Garante a estrutura do banco

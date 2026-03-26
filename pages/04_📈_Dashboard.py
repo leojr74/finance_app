@@ -2,19 +2,21 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import datetime
-from database import carregar_transacoes, get_gastos_fixos
+from database import carregar_transacoes, get_authenticator, get_gastos_fixos
 from ui import apply_global_style
 from categorizer import load_categories
 
-# --- PROTEÇÃO DE ACESSO E USUÁRIO ---
+authenticator = get_authenticator()
+authenticator.login(location='unrendered') 
+
 if not st.session_state.get("authentication_status"):
-    st.warning("Por favor, faça login na Home para acessar esta página.")
+    st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 
-usuario_atual = st.session_state["username"]
-
-# 1. CONFIGURAÇÃO E ESTILO
+usuario_atual = st.session_state["username"] 
 apply_global_style()
+
+
 
 def formatar(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")

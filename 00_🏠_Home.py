@@ -2,11 +2,10 @@ import streamlit as st
 import streamlit_authenticator as stauth
 import os
 import yaml
-from yaml.loader import SafeLoader
 from ui import apply_global_style
 from categorizer import load_categories
+from database import carregar_usuarios_db, check_auth, salvar_novo_usuario_db, criar_tabela
 
-# set_page_config DEVE ser chamado UMA SÓ VEZ
 st.set_page_config(
     page_title="Finanças Pessoais",
     page_icon="💰",
@@ -16,7 +15,8 @@ st.set_page_config(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(BASE_DIR, 'config.yaml')
 
-
+apply_global_style()
+criar_tabela()
 
 # --- CARREGAR CONFIGURAÇÕES ---
 try:
@@ -26,10 +26,13 @@ except Exception as e:
     st.error(f"Erro ao carregar config.yaml: {e}")
     st.stop()
 
+config['credentials'] = carregar_usuarios_db()
+cookie_key = st.secrets["auth"]["cookie_key"]
+
 authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
-    config['cookie']['key'],
+    cookie_key,
     config['cookie']['expiry_days']
 )
 
@@ -50,38 +53,58 @@ if not st.session_state.get("authentication_status"):
 
         with tab_signup:
             try:
-                # CORREÇÃO AQUI: Removemos o argumento pre_authorized. 
-                # Sem ele, a biblioteca entende que o cadastro está aberto.
+                
                 resultado = authenticator.register_user(location='main')
                 
                 if resultado:
-                    # Se o registro foi bem-sucedido, o 'config' na memória já tem os dados.
-                    # Agora escrevemos isso no arquivo config.yaml
-                    with open('config.yaml', 'w', encoding='utf-8') as file:
-                        yaml.dump(config, file, default_flow_style=False)
-                    st.success('Usuário registrado com sucesso! Agora clique na aba "Entrar".')
+                    
+                    email_novo, username_novo, nome_novo = resultado
+                    
+                    if username_novo:
+                        senha_para_salvar = config['credentials']['usernames'][username_novo]['password']
+    
+                        sucesso_db = salvar_novo_usuario_db(
+                            username=username_novo,
+                            email=email_novo,
+                            name=nome_novo,
+                            password_hashed=senha_para_salvar 
+                        )
+                        
+                        if sucesso_db:
+                            st.success(f'✅ Conta para {nome_novo} criada com sucesso no banco de dados!')
+                            st.info("Acesse a aba 'Entrar' para começar.")
+                            st.balloons()
+                            
             except Exception as e:
-                # Caso a sua instalação específica ainda peça um título, use: 
-                # authenticator.register_user('Registrar', location='main')
-                st.error(f"Erro no cadastro: {e}")
+                # Ignora erros visuais de formulário vazio
+                if "NoneType" not in str(e):
+                    st.error(f"Erro no processo de cadastro: {e}")
 
 # --- CONTEÚDO LOGADO ---
 if st.session_state.get("authentication_status"):
     authenticator.logout('Sair', 'sidebar')
     
-    # Define o e-mail na sessão para usarmos no Supabase
-    username = st.session_state["username"]
-    st.session_state["user_email"] = config['credentials']['usernames'][username]['email']
+    # O 'username' do session_state será o que o usuário digitou (apelido ou e-mail)
+    user_id = st.session_state["username"]
+    st.session_state["user_id"] = user_id
     
-    # Importação atrasada para evitar conflitos de banco de dados antes do login
-    from database import criar_tabela, get_categorias_completas, get_gastos_fixos, salvar_config_categoria
+    # Buscamos os dados desse login no dicionário que carregamos do Supabase
+    # Como mapeamos o e-mail e o username para o mesmo objeto, user_info será o mesmo
+    try:
+        user_info = config['credentials']['usernames'][user_id]
+        st.session_state["user_name"] = user_info.get('name', 'Usuário')
+        
+    except KeyError:
+        # Fallback de segurança caso algo falhe na busca do dicionário
+        st.error("Erro ao recuperar dados da sessão. Por favor, faça login novamente.")
+        st.stop()
 
-    apply_global_style()
-    criar_tabela()
+    # Importação das funções do banco de dados
+    from database import get_gastos_fixos, salvar_config_categoria
 
     # --- CONTEÚDO DA HOME ---
     st.title("💰 Sistema de Gestão Financeira")
-    st.markdown(f"### Bem-vindo, {st.session_state['name']}!")
+    st.markdown(f"### Bem-vindo, {st.session_state['user_name']}! 👋")
     st.write("---")
 
     st.markdown("### 🚀 Guia de Navegação")

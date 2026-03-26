@@ -3,14 +3,17 @@ import pandas as pd
 from datetime import date
 from categorizer import load_categories, find_category
 from ui import apply_global_style
-from database import conectar
+from database import conectar, get_authenticator
 
-# --- PROTEÇÃO DE ACESSO E DEFINIÇÃO DE USUÁRIO ---
+authenticator = get_authenticator()
+authenticator.login(location='unrendered') 
+
 if not st.session_state.get("authentication_status"):
-    st.warning("Por favor, faça login na Home para acessar esta página.")
+    st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 
-usuario_atual = st.session_state["username"]
+usuario_atual = st.session_state["username"] 
+apply_global_style()
 
 apply_global_style()
 

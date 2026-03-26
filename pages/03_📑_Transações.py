@@ -1,31 +1,30 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-from database import carregar_transacoes, save_all_changes 
+from database import carregar_transacoes, get_authenticator, get_engine, save_all_changes 
 from categorizer import load_categories, add_rule, clean_description, find_category
 from ui import apply_global_style
+from sqlalchemy import text
 
-# --- PROTEÇÃO DE ACESSO E USUÁRIO ---
+# --- 1. AUTENTICAÇÃO E SEGURANÇA ---
+authenticator = get_authenticator()
+authenticator.login(location='unrendered') 
+
 if not st.session_state.get("authentication_status"):
-    st.warning("Por favor, faça login na Home para acessar esta página.")
+    st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 
-usuario_atual = st.session_state["username"]
-
+usuario_atual = st.session_state["username"] 
 apply_global_style()
 
-# --- FUNÇÕES COM CACHE PARA ESCALABILIDADE ---
+# --- 2. FUNÇÕES AUXILIARES ---
 @st.cache_data
 def limpar_descricao_cached(descricao):
-    """Garante que a limpeza de texto seja feita apenas uma vez por descrição."""
     return clean_description(descricao)
 
 def aplicar_inteligencia_json(df):
-    """Aplica categorias automáticas baseadas nas regras do arquivo JSON."""
     df_copy = df.copy()
     rules = load_categories()
-    
-    # Identifica o que precisa de categoria
     mask = (df_copy["categoria"] == "Sem categoria") | (df_copy["categoria"].isna())
     
     if mask.any():
@@ -34,41 +33,45 @@ def aplicar_inteligencia_json(df):
         )
     return df_copy
 
+# --- 3. TÍTULO E CARREGAMENTO ---
 st.title("📑 Gerenciamento de Transações")
 
-# --- 1. CONFIGURAÇÃO DO FILTRO INICIAL (30 DIAS) ---
-hoje = date.today()
-trinta_dias_atras = hoje - timedelta(days=30)
-
-# --- 2. CARREGAMENTO DOS DADOS (AGORA COM USER_ID) ---
 if "df_transacoes" not in st.session_state:
-    # Passamos o usuario_atual para a função do database
     df = carregar_transacoes(usuario_atual) 
     
     if df is not None and not df.empty:
         df["data"] = pd.to_datetime(df["data"], errors='coerce')
         df["valor"] = pd.to_numeric(df["valor"], errors='coerce')
-        
-        # Inteligência aplicada no carregamento inicial
         df = aplicar_inteligencia_json(df)
-        
         df["SEL"] = False 
         st.session_state.df_transacoes = df.set_index("id")
+        # Track original IDs for deletion detection
+        st.session_state.original_transaction_ids = set(df["id"].tolist())
     else:
-        st.info(f"O banco de dados está vazio para o usuário {usuario_atual}.")
-        st.stop()
+        st.session_state.df_transacoes = pd.DataFrame(
+            columns=["SEL", "data", "descricao", "categoria", "valor", "banco"]
+        ).set_index("id")
+        st.session_state.original_transaction_ids = set()
+        st.session_state.df_transacoes["data"] = pd.to_datetime(st.session_state.df_transacoes["data"])
+        
+        st.info("Nenhuma transação encontrada para este usuário.")
 
-# --- 3. FILTROS E CATEGORIAS ---
+# --- 4. FILTROS DE INTERFACE ---
 st.write("---")
-c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
 
 with c1:
-    min_banco = st.session_state.df_transacoes["data"].min().date()
-    max_banco = st.session_state.df_transacoes["data"].max().date()
-    data_inicio_default = max(min_banco, trinta_dias_atras)
+    hoje = date.today()
+    df_temp = st.session_state.df_transacoes
+    tem_dados = not df_temp.empty and df_temp["data"].notna().any()
+    
+    min_banco = df_temp["data"].min().date() if tem_dados else hoje - timedelta(days=365)
+    max_banco = df_temp["data"].max().date() if tem_dados else hoje
+    
+    data_inicio_default = max(min_banco, hoje - timedelta(days=30))
     
     periodo = st.date_input(
-        "📅 Filtrar por período", 
+        "📅 Período", 
         value=(data_inicio_default, max_banco), 
         min_value=min_banco, 
         max_value=max_banco,
@@ -80,65 +83,107 @@ with c2:
     cats_do_json = set(str(v) for v in rules_filt.values() if v)
     cats_no_df = set(st.session_state.df_transacoes["categoria"].unique())
     lista_filtro = sorted(cats_do_json.union(cats_no_df).union({"Sem categoria"}))
-    categorias_sel = st.multiselect("📂 Filtrar por categoria", options=lista_filtro, default=[])
+    categorias_sel = st.multiselect("📂 Categoria", options=lista_filtro)
 
 with c3:
-    lista_bancos = sorted(st.session_state.df_transacoes["banco"].unique().tolist())
-    bancos_sel = st.multiselect("🏦 Banco", options=lista_bancos, default=[])
+    if "banco" in st.session_state.df_transacoes.columns:
+        lista_bancos = sorted(st.session_state.df_transacoes["banco"].dropna().unique().tolist())
+        bancos_sel = st.multiselect("🏦 Banco", options=lista_bancos)
+    else:
+        bancos_sel = []
 
 with c4:
-    busca = st.text_input("🔍 Buscar descrição", "").upper()
+    busca = st.text_input("🔍 Descrição", "").upper()
 
-# --- 4. APLICAÇÃO DOS FILTROS NO DISPLAY ---
+# --- 5. LÓGICA DE FILTRAGEM ---
 df_display = st.session_state.df_transacoes.copy()
+df_display["data"] = pd.to_datetime(df_display["data"], errors='coerce')
 
 if isinstance(periodo, tuple) and len(periodo) == 2:
     start_date, end_date = periodo
-    df_display = df_display[(df_display["data"].dt.date >= start_date) & (df_display["data"].dt.date <= end_date)]
+    mask = (df_display["data"].dt.date >= start_date) & (df_display["data"].dt.date <= end_date)
+    df_display = df_display[mask]
 
 if categorias_sel:
     df_display = df_display[df_display["categoria"].isin(categorias_sel)]
 
-if bancos_sel:
+if bancos_sel and "banco" in df_display.columns:
     df_display = df_display[df_display["banco"].isin(bancos_sel)]
 
 if busca:
-    df_display = df_display[df_display["descricao"].str.contains(busca, na=False)]
+    df_display = df_display[df_display["descricao"].str.contains(busca, na=False, case=False)]
 
-# --- 5. PREPARAÇÃO DO EDITOR ---
+# --- 6. PREPARAÇÃO DO EDITOR ---
 rules = load_categories()
 categorias_do_json = set(str(v) for v in rules.values() if v)
-categorias_no_df = set(st.session_state.df_transacoes["categoria"].unique())
+categorias_no_df = set(st.session_state.df_transacoes["categoria"].unique()) if not st.session_state.df_transacoes.empty else set()
 categorias_fixas = {"Alimentação", "Transporte", "Saúde", "Lazer", "Moradia", "Supermercado", "Sem categoria"}
 
-lista_categorias = sorted(categorias_do_json.union(categorias_no_df).union(categorias_fixas))
+lista_categorias = sorted(categorias_do_json.union(cats_no_df).union(categorias_fixas))
 opcoes_dropdown = lista_categorias + ["➕ Adicionar nova..."]
 
-st.write(f"Exibindo {len(df_display)} transações.")
-df_para_editar = df_display.reset_index()
-# Mantemos o 'id' oculto para controle, mas sem 'user_id' na interface
-cols = ["SEL", "data", "descricao", "categoria", "valor", "banco", "id"]
-df_para_editar = df_para_editar[cols]
 
-df_editado_raw = st.data_editor(
+# 1. Criamos a cópia para edição
+df_para_editar = df_display.copy()
+
+# 2. Transformamos o index (ID) em uma coluna real para que o editor a reconheça
+df_para_editar = df_para_editar.reset_index()
+
+# 3. Garantimos que a coluna SEL exista
+if "SEL" not in df_para_editar.columns:
+    df_para_editar.insert(0, "SEL", False)
+
+# 4. REORDENAÇÃO CRUCIAL: Definimos a ordem exata das colunas.
+# Colocamos 'SEL' primeiro e deixamos 'hash_fatura' e 'user_id' de fora da lista de visualização,
+# mas elas continuam no DataFrame para não quebrar a lógica de salvamento.
+cols_visiveis = ["SEL", "data", "descricao", "categoria", "valor", "banco", "id", "hash_fatura", "user_id"]
+df_para_editar = df_para_editar[cols_visiveis]
+
+# 5. RENDERIZAÇÃO DO EDITOR
+df_editado = st.data_editor(
     df_para_editar,
-    key="editor_v32", 
-    width = 'stretch',
+    key="editor_v33", # Sugiro subir para v33 para resetar o layout no navegador
+    width='stretch',
     num_rows="dynamic",
     column_config={
-        "id": None, 
-        "SEL": st.column_config.CheckboxColumn("Sel", help="Marcar"),
+        "id": None,           # Oculta a coluna de ID
+        "hash_fatura": None,  # Oculta a coluna de Hash
+        "user_id": None,      # Oculta a coluna de User ID
+        "SEL": st.column_config.CheckboxColumn("Sel", width="small", default=False),
         "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-        "descricao": st.column_config.TextColumn("Descrição"), 
         "categoria": st.column_config.SelectboxColumn("Categoria", options=opcoes_dropdown),
         "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f"),
         "banco": st.column_config.TextColumn("Banco", disabled=True),
     },
+    hide_index=True
 )
 
-# --- 6. AÇÕES EM MASSA ---
-df_editado = df_editado_raw.set_index("id")
-ids_marcados = df_editado[df_editado["SEL"] == True].index.tolist()
+# As edições são lidas diretamente de df_editado no botão salvar.
+
+# --- 7. AÇÕES EM MASSA ---
+
+st.write(f"Exibindo {len(df_para_editar)} transações.")
+
+# Criamos colunas para os botões ficarem lado a lado
+col_sel1, col_sel2, _ = st.columns([1, 1, 4])
+
+with col_sel1:
+    if st.button("✅ Selecionar Tudo", key="btn_sel_all"):
+        # Marcamos como True apenas as linhas que estão visíveis no filtro atual (df_display)
+        st.session_state.df_transacoes.loc[df_display.index, "SEL"] = True
+        st.rerun()
+
+with col_sel2:
+    if st.button("🔲 Desmarcar Tudo", key="btn_desel_all"):
+        # Limpa a seleção de todas as transações do usuário
+        st.session_state.df_transacoes["SEL"] = False
+        st.rerun()
+if df_editado is not None and not df_editado.empty:
+    # Garante que o índice para as ações em massa seja o ID
+    df_massa = df_editado.set_index("id")
+    ids_marcados = df_massa[df_massa["SEL"] == True].index.tolist()
+else:
+    ids_marcados = []
 
 if ids_marcados:
     with st.container(border=True):
@@ -156,71 +201,77 @@ if ids_marcados:
                 st.session_state.df_transacoes.drop(ids_marcados, inplace=True)
                 st.rerun()
 
-# --- 7. NOVA CATEGORIA ---
-nova_cat_final = ""
-if any(df_editado["categoria"] == "➕ Adicionar nova..."):
-    with st.container(border=True):
-        nova_cat_final = st.text_input("Nome da nova categoria:", key="new_cat_v32").strip()
-
 # --- 8. SALVAMENTO E REPLICAÇÃO ---
+nova_cat_final = ""
+if df_editado is not None and any(df_editado["categoria"] == "➕ Adicionar nova..."):
+    with st.container(border=True):
+        nova_cat_final = st.text_input("Nome da nova categoria:", key="new_cat_input").strip()
+
 st.divider()
 b1, b2 = st.columns(2)
+
 with b1:
-    if st.button("💾 Salvar e Replicar", type="primary", key="save_v32"):
-        if any(df_editado["categoria"] == "➕ Adicionar nova...") and not nova_cat_final:
-            st.error("Escreva o nome da categoria no campo acima antes de salvar.")
-            st.stop()
-            
-        st.toast("Processando regras...")
-        st.cache_data.clear()
+    if st.button("💾 Salvar Alterações", type="primary", key="save_v32"):
+        try:
+            with st.status("Gravando permanentemente...") as status:
+                # 9. SINCRONIZAR EDIÇÕES DO EDITOR COM O SESSION STATE
+                if df_editado is not None and not df_editado.empty:
+                    # Criar um dicionário das edições por ID
+                    df_editado_indexed = df_editado.set_index("id")
+                    
+                    # Para cada linha editada, atualizar o session state
+                    for idx, row in df_editado_indexed.iterrows():
+                        if idx in st.session_state.df_transacoes.index:
+                            # Atualizar apenas as colunas editáveis
+                            st.session_state.df_transacoes.loc[idx, "data"] = pd.to_datetime(row["data"])
+                            st.session_state.df_transacoes.loc[idx, "descricao"] = str(row["descricao"])
+                            st.session_state.df_transacoes.loc[idx, "categoria"] = str(row["categoria"])
+                            st.session_state.df_transacoes.loc[idx, "valor"] = float(row["valor"])
+                            # Não atualizar banco pois está desabilitado no editor
 
-        # 2. Sincroniza exclusões no estado da sessão
-        ids_vivos = set(df_editado.index)
-        ids_originais = set(df_display.index)
-        st.session_state.df_transacoes.drop(ids_originais - ids_vivos, inplace=True, errors='ignore')
+                # 1. Se o usuário criou uma nova categoria, aplica no estado primeiro
+                if nova_cat_final:
+                    st.session_state.df_transacoes.loc[
+                        st.session_state.df_transacoes["categoria"] == "➕ Adicionar nova...", "categoria"
+                    ] = nova_cat_final
 
-        # 3. Trata nova categoria
-        if nova_cat_final:
-            df_editado["categoria"] = df_editado["categoria"].replace("➕ Adicionar nova...", nova_cat_final)
-
-        # 4. Atualiza o estado global
-        st.session_state.df_transacoes.update(df_editado)
-
-        # 5. REPLICAÇÃO E REGRAS
-        desc_limpas_total = st.session_state.df_transacoes["descricao"].apply(limpar_descricao_cached)
-        
-        for idx, row in df_editado.iterrows():
-            cat_row = row["categoria"] 
-            
-            if pd.notna(cat_row) and cat_row not in ["Sem categoria", "➕ Adicionar nova...", "---"]:
-                d_limpa = limpar_descricao_cached(row["descricao"])
-                add_rule(d_limpa, cat_row)
+                # 2. DETECTAR E REMOVER TRANSAÇÕES EXCLUÍDAS
+                current_ids = set(st.session_state.df_transacoes.index)
+                original_ids = st.session_state.get("original_transaction_ids", set())
+                deleted_ids = original_ids - current_ids
                 
-                mask = (desc_limpas_total == d_limpa) & \
-                       (st.session_state.df_transacoes["categoria"].fillna("Sem categoria") == "Sem categoria")
-                
-                st.session_state.df_transacoes.loc[mask, "categoria"] = cat_row
+                if deleted_ids:
+                    from database import deletar_transacoes
+                    deletar_transacoes(list(deleted_ids), usuario_atual)
 
-        # 6. Salva no Banco de Dados SQL (MODIFICADO PARA SEGURANÇA)
-        st.session_state.df_transacoes["SEL"] = False
-        df_sql = st.session_state.df_transacoes.reset_index().drop(columns=["SEL"], errors='ignore')
-        
-        # Injeta o user_id em todas as linhas antes de salvar
-        df_sql["user_id"] = usuario_atual
-        df_sql["data"] = pd.to_datetime(df_sql["data"]).dt.strftime('%Y-%m-%d')
-        
-        # A função save_all_changes deve ser atualizada no database.py para lidar com user_id
-        save_all_changes(df_sql, usuario_atual)
-        
-        if "df_transacoes" in st.session_state:
-            del st.session_state.df_transacoes
-            
-        st.success("✅ Salvo e Categorias Replicadas!")
-        st.rerun()
+                # 3. FONTE DA VERDADE: Usamos o session_state que já foi sincronizado
+                df_para_sql = st.session_state.df_transacoes.reset_index()
+                
+                # 4. Limpa colunas que não existem no banco de dados
+                df_para_sql = df_para_sql.drop(columns=["SEL"], errors='ignore')
+                df_para_sql["user_id"] = usuario_atual 
+
+                # 5. Envia os dados JÁ EDITADOS para o banco
+                from database import save_all_changes
+                n = save_all_changes(df_para_sql, usuario_atual)
+                
+                # 6. Limpa cache para o F5 ler o dado real do banco
+                st.cache_data.clear()
+                if "df_transacoes" in st.session_state:
+                    del st.session_state.df_transacoes
+                if "original_transaction_ids" in st.session_state:
+                    del st.session_state.original_transaction_ids
+                
+                status.update(label=f"✅ {n} transações sincronizadas com sucesso!", state="complete")
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Erro ao persistir no banco: {e}")
 
 with b2:
-    if st.button("🔄 Recarregar Banco", key="reload_v32"):
+    if st.button("🔄 Recarregar Dados", key="reload_v32"):
         st.cache_data.clear()
         if "df_transacoes" in st.session_state: 
             del st.session_state.df_transacoes
+        if "original_transaction_ids" in st.session_state:
+            del st.session_state.original_transaction_ids
         st.rerun()

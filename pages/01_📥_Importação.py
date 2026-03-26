@@ -5,15 +5,16 @@ import os
 import tempfile
 from datetime import date
 from ui import apply_global_style
-from database import conectar
+from database import conectar, get_authenticator
 
-# --- PROTEÇÃO DE ACESSO ---
+authenticator = get_authenticator()
+authenticator.login(location='unrendered') 
+
 if not st.session_state.get("authentication_status"):
-    st.warning("Por favor, faça login na Home para acessar esta página.")
+    st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 
-usuario_atual = st.session_state["username"]
-
+usuario_atual = st.session_state["username"] 
 apply_global_style()
 
 from parser_router import extract_transactions_auto
@@ -56,7 +57,7 @@ if uploaded:
         if result and "transactions" in result:
             df = pd.DataFrame(result["transactions"])
             
-            # Normalização
+            # Normalização inicial para exibição
             df["data"] = pd.to_datetime(df["data"], dayfirst=True, errors="coerce")
             df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
             df["descricao"] = df["descricao"].astype(str).str.upper()
@@ -95,72 +96,102 @@ if uploaded:
             total_fatura = df["valor"].sum()
             st.metric(label="Total Extraído", value=f"R$ {total_fatura:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
-            # Hash da fatura
-            hash_base = f"{banco_nome}_{data_inicio}_{data_fim}"
-            hash_fatura = hashlib.sha256(hash_base.encode()).hexdigest()
-
             # --------------------------------------------------
-            # Botão salvar (MODIFICADO PARA USER_ID)
+            # Botão salvar 
             # --------------------------------------------------
-            if st.button("💾 Salvar no banco"):
-                try:
-                    conn = conectar()
-                    if not conn:
-                        st.error("Não foi possível conectar ao banco.")
-                        st.stop()
-                    
-                    cursor = conn.cursor()
-                    
-                    # BUSCA APENAS O HISTÓRICO DESTE USUÁRIO
-                    query_h = "SELECT data, valor, banco, hash_fatura, descricao FROM transacoes WHERE user_id = %s"
-                    df_h = pd.read_sql_query(query_h, conn, params=(usuario_atual,))
-                    
-                    if not df_h.empty:
-                        df_h['data'] = pd.to_datetime(df_h['data']).dt.date
-                        df_h['valor'] = df_h['valor'].astype(float).round(2)
-                        df_h['banco'] = df_h['banco'].astype(str)
+            
+        if st.button("💾 Salvar no Banco", key="save_db_btn"):
+            try:
+                conn = conectar()
+                if conn:
+                    # 1. Preparação para evitar duplicatas manuais
+                    from database import carregar_transacoes
+                    df_existente = carregar_transacoes(usuario_atual)
+                    if not df_existente.empty:
+                        df_existente['data'] = pd.to_datetime(df_existente['data'])
 
-                    inseridas = 0
-                    ignoradas_manual = 0
-                    
-                    for _, row in st.session_state.df_transacoes.iterrows():
-                        t_data = row['data'].date()
-                        t_valor = round(float(row['valor']), 2)
-                        t_desc = str(row['descricao'])
-                        
-                        # Filtro contra lançamentos manuais DESTE usuário
-                        if not df_h.empty:
-                            conflito_manual = df_h[
-                                (df_h['data'] == t_data) & 
-                                (df_h['valor'] == t_valor) & 
-                                (df_h['banco'] == banco_nome) & 
-                                (df_h['hash_fatura'] == 'MANUAL_ENTRY')
-                            ]
-                            
-                            if not conflito_manual.empty:
-                                ignoradas_manual += 1
+                    dados_para_inserir = []
+                    stats = {"novas": 0, "duplicadas_manual": 0, "duplicadas_fatura": 0}
+
+                    import calendar
+                    with conn.cursor() as cursor:
+                        # Iteramos sobre o DataFrame processado para garantir consistência
+                        for _, row in df.iterrows():
+                            if pd.isna(row['data']): continue
+
+                            # --- AJUSTE DE DATA PARA COMPETÊNCIA (Mês do Orçamento) ---
+                            dia_original = row['data'].day
+                            try:
+                                data_ajustada = date(data_inicio.year, data_inicio.month, dia_original)
+                            except ValueError:
+                                ultimo_dia = calendar.monthrange(data_inicio.year, data_inicio.month)[1]
+                                data_ajustada = date(data_inicio.year, data_inicio.month, ultimo_dia)
+
+                            data_final_str = data_ajustada.strftime('%Y-%m-%d')
+                            desc_proc = str(row['descricao']).upper()
+                            valor_proc = abs(float(row['valor']))
+                            cat_proc = row.get('categoria') if pd.notna(row.get('categoria')) else "Sem categoria"
+
+                            # Hash Único baseado na data AJUSTADA para o orçamento
+                            raw_str = f"{data_final_str}{valor_proc}{desc_proc}{banco_nome}{usuario_atual}"
+                            h = hashlib.md5(raw_str.encode()).hexdigest()
+
+                            # --- VALIDAÇÃO 1: HASH (Fatura já importada) ---
+                            from database import verificar_duplicata
+                            if verificar_duplicata(h, usuario_atual):
+                                stats["duplicadas_fatura"] += 1
                                 continue
 
-                        # INSERÇÃO INCLUINDO O USER_ID
-                        cursor.execute("""
-                            INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura, user_id)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """, (t_data, t_desc, t_valor, row.get("categoria", "Sem categoria"), banco_nome, hash_fatura, usuario_atual))
-                        inseridas += 1
+                            # --- VALIDAÇÃO 2: MANUAL (Mesmo dia, valor e banco) ---
+                            is_manual_dup = False
+                            if not df_existente.empty:
+                                match = df_existente[
+                                    (df_existente['data'].dt.date == data_ajustada) & 
+                                    (df_existente['valor'] == valor_proc) & 
+                                    (df_existente['banco'] == banco_nome)
+                                ]
+                                if not match.empty:
+                                    is_manual_dup = True
 
-                    conn.commit()
-                    st.success(f"✅ {inseridas} transações salvas para {usuario_atual}!")
-                    
-                    if ignoradas_manual > 0:
-                        st.warning(f"📌 {ignoradas_manual} transações ignoradas por já existirem no lançamento manual.")
-                    
-                    del st.session_state.df_transacoes
-                    
-                except Exception as e:
-                    if conn: conn.rollback()
-                    st.error(f"Erro ao salvar: {e}")
-                finally:
-                    if conn: conn.close()
+                            if is_manual_dup:
+                                stats["duplicadas_manual"] += 1
+                            else:
+                                stats["novas"] += 1
+                                dados_para_inserir.append((
+                                    data_final_str, desc_proc, cat_proc, valor_proc, 
+                                    banco_nome, usuario_atual, h
+                                ))
+
+                        # 2. Execução do salvamento em lote
+                        if dados_para_inserir:
+                            from psycopg2.extras import execute_batch
+                            query = '''
+                                INSERT INTO transacoes (data, descricao, categoria, valor, banco, user_id, hash_fatura)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            '''
+                            execute_batch(cursor, query, dados_para_inserir)
+                            conn.commit()
+                            st.success(f"✅ {stats['novas']} novas transações importadas com sucesso!")
+                        
+                        # 3. Feedbacks detalhados
+                        if stats["duplicadas_manual"] > 0:
+                            st.info(f"📌 {stats['duplicadas_manual']} transações ignoradas (já existem lançamentos manuais no mesmo dia).")
+                        
+                        if stats["duplicadas_fatura"] > 0:
+                            st.warning(f"🚫 {stats['duplicadas_fatura']} transações já constavam em importações anteriores.")
+
+                        if stats["novas"] == 0 and stats["duplicadas_manual"] == 0 and stats["duplicadas_fatura"] == 0:
+                            st.warning("Nenhuma transação nova encontrada no PDF.")
+
+                        # Limpa cache para atualizar página de transações
+                        if 'df_transacoes' in st.session_state:
+                            del st.session_state.df_transacoes
+
+            except Exception as e:
+                if conn: conn.rollback()
+                st.error(f"Erro ao salvar no banco: {e}")
+            finally:
+                if conn: conn.close()
                     
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
