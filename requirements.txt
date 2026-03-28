@@ -7,3 +7,4 @@ altair==6.0.0
 psycopg2-binary==2.9.11
 streamlit-authenticator
 PyYAML
+sqlalchemy
