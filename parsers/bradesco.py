@@ -44,9 +44,7 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
 
         matches = pattern.finditer(text_section)
 
-        print("\n" + "="*120)
-        print("BRADESCO DEBUG")
-        print("="*120)
+        
 
         for m in matches:
 

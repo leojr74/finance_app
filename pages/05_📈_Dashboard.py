@@ -6,6 +6,12 @@ from database import carregar_transacoes, get_authenticator, get_gastos_fixos
 from ui import apply_global_style
 from categorizer import load_categories
 
+st.set_page_config(
+    page_title="Dashboard Financeiro",
+    page_icon="📈",
+    layout="wide"
+)
+
 authenticator = get_authenticator()
 authenticator.login(location='unrendered') 
 

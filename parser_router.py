@@ -16,11 +16,7 @@ from parsers import (
     santander
 )
 
-logging.basicConfig(
-    filename="parser_debug.log",
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
+
 
 PARSERS = {
     "bb": bb.extract_transactions,
@@ -123,7 +119,7 @@ def normalizar_transacoes(raw_transactions, data_inicio, data_fim):
 def extract_transactions_auto(pdf_path, data_inicio, data_fim):
 
     bank = bank_detector.detect_bank(pdf_path)
-    print(f"DEBUG banco detectado: {repr(bank)}")  # ADD THIS
+    
     if not bank:
         raise ValueError("Banco não detectado")
 
@@ -136,11 +132,7 @@ def extract_transactions_auto(pdf_path, data_inicio, data_fim):
     ano_fatura = data_fim.year
 
     raw_transactions = parser(pdf_path, mes_fatura, ano_fatura)
-    print(f"DEBUG raw_transactions count: {len(raw_transactions)}")
-    if raw_transactions:
-        print(f"DEBUG primeira: {raw_transactions[0]}")
-    else:
-        print("DEBUG parser retornou lista vazia")
+    
     transactions = normalizar_transacoes(
         raw_transactions,
         data_inicio,

@@ -39,7 +39,7 @@ def extract_transactions(pdf_path, mes_fatura, ano_fatura):
         
         # Padrão: DD/MM + descrição + valor + sinal opcional "-"
         pattern = re.compile(
-            r'(\d{2}/\d{2})\s+(.+?)\s+(\d{1,3}(?:\.\d{3})*,\d{2})(-?)',
+            r'(\d{2}/\d{2})\s+(.+?)\s+(\d{1,3}(?:\.\d{3})*,\d{2})\s*(-?)\s*$',
             re.MULTILINE
         )
         

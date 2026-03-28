@@ -12,6 +12,12 @@ from database import (
 )
 from ui import apply_global_style
 
+st.set_page_config(
+    page_title="Planejamento de Orçamento",
+    page_icon="📊",
+    layout="wide"
+)
+
 authenticator = get_authenticator()
 authenticator.login(location='unrendered') 
 

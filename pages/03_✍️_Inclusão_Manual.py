@@ -5,6 +5,12 @@ from categorizer import load_categories, find_category
 from ui import apply_global_style
 from database import conectar, get_authenticator
 
+st.set_page_config(
+    page_title="Inclusão Manual de Transações",
+    page_icon="✍️",
+    layout="wide"
+)
+
 authenticator = get_authenticator()
 authenticator.login(location='unrendered') 
 
@@ -18,7 +24,7 @@ apply_global_style()
 apply_global_style()
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.title("✍️ Inclusão Manual")
+st.title("✍️ Inclusão Manual de Transações")
 st.markdown(f"Registre gastos para a conta de **{st.session_state['name']}**.")
 
 # --- 1. CARREGAMENTO DE OPÇÕES (BANCOS E CATEGORIAS) ---

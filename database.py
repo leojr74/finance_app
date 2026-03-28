@@ -306,3 +306,39 @@ def salvar_config_categoria(categoria, is_fixo, user_id):
         print(f"Erro ao salvar config de categoria: {e}")
     finally:
         conn.close()
+
+# --- SEÇÃO DE ORÇAMENTO (RESTAURADA) ---
+
+def salvar_orcamento(categoria, valor, mes, ano, user_id):
+    engine = get_engine()
+    with engine.begin() as conn:
+        # Busca se já existe o registro
+        result = conn.execute(text('''
+            SELECT id FROM orcamentos 
+            WHERE categoria = :c AND mes = :m AND ano = :a AND user_id = :u
+        ''', {"c": categoria, "m": mes, "a": ano, "u": user_id})).fetchone()
+        
+        if result:
+            # Update
+            conn.execute(text("UPDATE orcamentos SET valor = :v WHERE id = :id"), 
+                         {"v": valor, "id": result[0]})
+        else:
+            # Insert
+            conn.execute(text('''
+                INSERT INTO orcamentos (categoria, valor, mes, ano, user_id)
+                VALUES (:c, :v, :m, :a, :u)
+            ''', {"c": categoria, "v": valor, "m": mes, "a": ano, "u": user_id}))
+
+def carregar_orcamentos(mes, ano, user_id):
+    engine = get_engine()
+    query = "SELECT * FROM orcamentos WHERE user_id = :u AND mes = :m AND ano = :a"
+    return pd.read_sql_query(text(query), engine, params={"u": user_id, "m": mes, "a": ano})
+
+# --- UTILITÁRIOS (RESTAURADA) ---
+
+def limpar_banco_usuario(user_id):
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM transacoes WHERE user_id = :u"), {"u": user_id})
+        conn.execute(text("DELETE FROM orcamentos WHERE user_id = :u"), {"u": user_id})
+        conn.execute(text("DELETE FROM config_categorias WHERE user_id = :u"), {"u": user_id})

@@ -1,10 +1,16 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-from database import carregar_transacoes, get_authenticator, get_engine, save_all_changes 
+from database import carregar_transacoes, get_authenticator, get_engine, save_all_changes, deletar_transacoes
 from categorizer import load_categories, add_rule, clean_description, find_category
 from ui import apply_global_style
 from sqlalchemy import text
+
+st.set_page_config(
+    page_title="Gerenciamento de Transações",
+    page_icon="📑",
+    layout="wide"
+)
 
 # --- 1. AUTENTICAÇÃO E SEGURANÇA ---
 authenticator = get_authenticator()
@@ -151,6 +157,7 @@ df_editado = st.data_editor(
         "user_id": None,      # Oculta a coluna de User ID
         "SEL": st.column_config.CheckboxColumn("Sel", width="small", default=False),
         "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+        "descricao": st.column_config.TextColumn("Descrição"),
         "categoria": st.column_config.SelectboxColumn("Categoria", options=opcoes_dropdown),
         "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f"),
         "banco": st.column_config.TextColumn("Banco", disabled=True),
@@ -211,61 +218,85 @@ st.divider()
 b1, b2 = st.columns(2)
 
 with b1:
-    if st.button("💾 Salvar Alterações", type="primary", key="save_v32"):
+    if st.button("💾 Salvar Alterações", type="primary", key="save_v33"):
         try:
-            with st.status("Gravando permanentemente...") as status:
-                # 9. SINCRONIZAR EDIÇÕES DO EDITOR COM O SESSION STATE
+            with st.status("Sincronizando banco e propagando regras...") as status:
+                # 1. PROCESSAR EDIÇÕES E PROPAGAR NA MEMÓRIA
                 if df_editado is not None and not df_editado.empty:
-                    # Criar um dicionário das edições por ID
                     df_editado_indexed = df_editado.set_index("id")
                     
-                    # Para cada linha editada, atualizar o session state
                     for idx, row in df_editado_indexed.iterrows():
                         if idx in st.session_state.df_transacoes.index:
-                            # Atualizar apenas as colunas editáveis
+                            desc_atual = str(row["descricao"])
+                            cat_selecionada = str(row["categoria"])
+                            cat_anterior = str(st.session_state.df_transacoes.loc[idx, "categoria"])
+                            
+                            # Se você alterou a categoria para uma já existente
+                            if cat_selecionada != "➕ Adicionar nova..." and cat_selecionada != cat_anterior:
+                                # A) Aprende no JSON
+                                add_rule(desc_atual, cat_selecionada)
+                                
+                                # B) PROPAGAÇÃO IMEDIATA NA TELA (Session State)
+                                # Isso faz com que todos os "UBER" virem "Transporte" antes de salvar
+                                mask = (st.session_state.df_transacoes["descricao"] == desc_atual) & \
+                                       (st.session_state.df_transacoes["categoria"] == "Sem categoria")
+                                st.session_state.df_transacoes.loc[mask, "categoria"] = cat_selecionada
+
+                            # Atualiza a linha específica que você editou (Data, Valor, etc)
                             st.session_state.df_transacoes.loc[idx, "data"] = pd.to_datetime(row["data"])
-                            st.session_state.df_transacoes.loc[idx, "descricao"] = str(row["descricao"])
-                            st.session_state.df_transacoes.loc[idx, "categoria"] = str(row["categoria"])
+                            st.session_state.df_transacoes.loc[idx, "descricao"] = desc_atual
+                            st.session_state.df_transacoes.loc[idx, "categoria"] = cat_selecionada
                             st.session_state.df_transacoes.loc[idx, "valor"] = float(row["valor"])
-                            # Não atualizar banco pois está desabilitado no editor
 
-                # 1. Se o usuário criou uma nova categoria, aplica no estado primeiro
+                # 2. TRATAR NOVA CATEGORIA (Text Input)
                 if nova_cat_final:
-                    st.session_state.df_transacoes.loc[
-                        st.session_state.df_transacoes["categoria"] == "➕ Adicionar nova...", "categoria"
-                    ] = nova_cat_final
+                    mask_nova = st.session_state.df_transacoes["categoria"] == "➕ Adicionar nova..."
+                    descricoes_para_nova = st.session_state.df_transacoes.loc[mask_nova, "descricao"].unique()
+                    
+                    for d in descricoes_para_nova:
+                        add_rule(d, nova_cat_final)
+                    
+                    # Aplica o nome da nova categoria em todas as linhas correspondentes
+                    st.session_state.df_transacoes.loc[mask_nova, "categoria"] = nova_cat_final
 
-                # 2. DETECTAR E REMOVER TRANSAÇÕES EXCLUÍDAS
+                # 3. REMOVER TRANSAÇÕES EXCLUÍDAS
                 current_ids = set(st.session_state.df_transacoes.index)
                 original_ids = st.session_state.get("original_transaction_ids", set())
                 deleted_ids = original_ids - current_ids
-                
                 if deleted_ids:
                     from database import deletar_transacoes
                     deletar_transacoes(list(deleted_ids), usuario_atual)
 
-                # 3. FONTE DA VERDADE: Usamos o session_state que já foi sincronizado
+                # 4. SALVAR TUDO NO SQL (Incluindo as propagadas)
                 df_para_sql = st.session_state.df_transacoes.reset_index()
-                
-                # 4. Limpa colunas que não existem no banco de dados
                 df_para_sql = df_para_sql.drop(columns=["SEL"], errors='ignore')
                 df_para_sql["user_id"] = usuario_atual 
-
-                # 5. Envia os dados JÁ EDITADOS para o banco
-                from database import save_all_changes
-                n = save_all_changes(df_para_sql, usuario_atual)
                 
-                # 6. Limpa cache para o F5 ler o dado real do banco
+                from database import save_all_changes, get_engine
+                n = save_all_changes(df_para_sql, usuario_atual)
+
+                # 5. SQL DE PROPAGAÇÃO MASSIVA (Para o histórico fora da tela)
+                engine = get_engine()
+                with engine.begin() as conn:
+                    conn.execute(text("""
+                        UPDATE transacoes t SET categoria = m.categoria
+                        FROM (
+                            SELECT DISTINCT ON (descricao) descricao, categoria FROM transacoes
+                            WHERE user_id = :u AND categoria != 'Sem categoria' AND categoria IS NOT NULL
+                            ORDER BY descricao, id DESC
+                        ) m
+                        WHERE t.descricao = m.descricao AND t.user_id = :u AND t.categoria = 'Sem categoria';
+                    """), {"u": usuario_atual})
+
+                # 6. LIMPEZA FINAL
                 st.cache_data.clear()
                 if "df_transacoes" in st.session_state:
                     del st.session_state.df_transacoes
-                if "original_transaction_ids" in st.session_state:
-                    del st.session_state.original_transaction_ids
                 
-                status.update(label=f"✅ {n} transações sincronizadas com sucesso!", state="complete")
+                status.update(label="✅ Salvo, JSON atualizado e categorias propagadas!", state="complete")
             st.rerun()
         except Exception as e:
-            st.error(f"❌ Erro ao persistir no banco: {e}")
+            st.error(f"❌ Erro: {e}")
 
 with b2:
     if st.button("🔄 Recarregar Dados", key="reload_v32"):

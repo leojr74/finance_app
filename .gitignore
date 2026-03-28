@@ -70,4 +70,4 @@ temp/
 
 *.bat
 
-.streamlit/
+.streamlit/secrets.toml
