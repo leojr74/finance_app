@@ -46,5 +46,29 @@ def apply_global_style():
             font-weight: 600;
         }
 
+        /* Tradução dos labels do streamlit-authenticator */
+        /* Primeiro stTextInput do formulário = campo Username */
+        div[data-testid="stTextInput"]:first-of-type label span p {
+            visibility: hidden;
+            position: relative;
+        }
+        div[data-testid="stTextInput"]:first-of-type label span p::after {
+            content: "Email";
+            visibility: visible;
+            position: absolute;
+            left: 0;
+        }
+
+        [data-testid="stTextInput"]:has(input[type="password"]) label span p {
+            visibility: hidden;
+            position: relative;
+        }
+        [data-testid="stTextInput"]:has(input[type="password"]) label span p::after {
+            content: "Senha";
+            visibility: visible;
+            position: absolute;
+            left: 0;
+        }
+
         </style>
     """, unsafe_allow_html=True)
