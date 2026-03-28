@@ -45,7 +45,15 @@ if not st.session_state.get("authentication_status"):
         tab_login, tab_signup = st.tabs(["🔐 Entrar", "📝 Criar Conta"])
         
         with tab_login:
-            authenticator.login(location='main')
+            authenticator.login(
+                location='main',
+                fields={
+                    'Form name': 'Acesso',
+                    'Username': 'Email',    # Substitui "Username" por "Email"
+                    'Password': 'Senha',    # Substitui "Password" por "Senha"
+                    'Login': 'Entrar'       # Substitui o texto do botão "Login" por "Entrar"
+                }
+            )
             if st.session_state.get("authentication_status") is False:
                 st.error('Usuário ou senha incorretos')
             elif st.session_state.get("authentication_status") is None:
