@@ -120,17 +120,17 @@ if st.session_state.get("authentication_status"):
     st.info("💡 **Dica Mobile:** Toque no ícone de menu ( **»** ) no canto superior esquerdo para navegar pelas páginas.")
     
     st.info("""
-    **📥 Importação de faturas** Envie PDFs de faturas. O sistema detecta o banco e evita duplicatas automaticamente.
+    **📥 Importação de faturas** - Envie PDFs de faturas. O sistema detecta o banco e evita duplicatas automaticamente.
 
-    **📱 Importação de SMS** Utilize SMS recebidos para manter as transações atualizadas. Suporte a upload de arquivos .txt e colagem direta.
+    **📱 Importação de SMS** - Utilize SMS recebidos para manter as transações atualizadas. Suporte a upload de arquivos .txt e colagem direta.
 
-    **✍️ Inclusão Manual** Registre gastos em dinheiro ou extras. Ideal para saques, PIX avulsos ou taxas.
+    **✍️ Inclusão Manual** - Registre gastos em dinheiro ou extras. Ideal para saques, PIX avulsos ou taxas.
             
-    **📑 Transações** Gerencie e categorize seus dados. Valide as sugestões de nossa IA e replique regras.
+    **📑 Transações** - Gerencie e categorize seus dados. Valide as sugestões de nossa IA e replique regras.
 
-    **📈 Dashboard** Analise suas médias e totais. Visão macro com filtros específicos para Gastos Fixos.
+    **📈 Dashboard** - Analise suas médias e totais. Visão macro com filtros específicos para Gastos Fixos.
     
-    **📊 Orçamento** Defina suas metas mensais. Acompanhe o planejado vs. realizado com alertas de teto.
+    **📊 Orçamento** - Defina suas metas mensais. Acompanhe o planejado vs. realizado com alertas de teto.
     """)
 
     st.write("---")
