@@ -117,9 +117,7 @@ if st.session_state.get("authentication_status"):
 
     st.markdown("### 🚀 Guia de Navegação")
 
-    st.info("""
-    Na versão mobile, clique em >> para abrir o menu lateral.
-    """)
+    st.info("💡 **Dica Mobile:** Toque no ícone de menu ( **»** ) no canto superior esquerdo para navegar pelas páginas.")
     
     st.info("""
     **📥 Importação de faturas ** Envie PDFs de faturas. O sistema detecta o banco e evita duplicatas automaticamente.
