@@ -2,88 +2,86 @@ import fitz
 import re
 
 
-def ajustar_data_compra(dia, mes_fatura, ano_fatura, inicio_ciclo=12):
-
-    if dia >= inicio_ciclo:
-        mes = mes_fatura - 1
-    else:
-        mes = mes_fatura
-
-    if mes == 0:
-        mes = 12
-        ano = ano_fatura - 1
-    else:
-        ano = ano_fatura
-
-    return f"{dia:02d}/{mes:02d}/{ano}"
-
-
 def extract_transactions(pdf_path, mes_fatura, ano_fatura):
-
+    """
+    Parser para Bradesco - Layout novo (colunas: Data, Histórico, Cidade, US$, Cotação, R$).
+    O PyMuPDF extrai cada coluna em linha separada, então processamos linha a linha.
+    Estrutura por transação:
+        DD/MM                  ← linha com a data
+        DESCRIÇÃO              ← próxima linha de texto
+        CIDADE (opcional)      ← ignorada
+        VALOR [-]              ← linha com o valor
+    """
     transactions = []
 
+    IGNORAR = [
+        'PAG BOLETO', 'PAGAMENTO', 'JOSE LEONARDO', 'TOTAL',
+        'PROXIMO', 'DEMAIS', 'HISTORICO', 'COTACAO', 'LANCAMENTOS',
+        'DATA ', 'CIDADE', 'US$', 'DO DOLAR', 'CARTAO'
+    ]
+
+    data_re = re.compile(r'^(\d{2}/\d{2})\s*(.*)')
+    valor_re = re.compile(r'^(\d{1,3}(?:\.\d{3})*,\d{2})\s*(-?)\s*$')
+
     try:
-
         text_all = ""
-
         for page in fitz.open(pdf_path):
-            page_text = page.get_text() or ""
-            text_all += page_text + "\n"
+            text_all += (page.get_text() or "") + "\n"
 
-        # seção onde começam os lançamentos
-        start = text_all.find("Histórico de Lançamentos")
-
+        start = text_all.find("Lançamentos")
         if start == -1:
             return []
 
-        text_section = text_all[start:]
+        end = text_all.find("Total para", start)
+        if end == -1:
+            end = text_all.find("Total da fatura", start)
+        if end == -1:
+            end = len(text_all)
 
-        pattern = re.compile(
-            r'(\d{2}/\d{2})\s+(.+?)\s+(\d{1,3}(?:\.\d{3})*,\d{2})(-?)'
-        )
+        linhas = text_all[start:end].splitlines()
 
-        matches = pattern.finditer(text_section)
+        pendente_data = None
+        pendente_desc = None
 
-        
+        for linha in linhas:
+            linha = linha.strip()
 
-        for m in matches:
-
-            data = m.group(1)
-            desc = m.group(2).strip().upper()
-            valor_str = m.group(3)
-            sinal = m.group(4)
-
-            # filtro pagamento da fatura
-            if "PAG BOLETO" in desc.upper():
+            m_data = data_re.match(linha)
+            if m_data:
+                pendente_data = m_data.group(1)
+                resto = m_data.group(2).strip().upper()
+                pendente_desc = resto if resto and not any(x in resto for x in IGNORAR) else None
                 continue
 
-            if desc.startswith("Total"):
-                continue
+            if pendente_data:
+                m_valor = valor_re.match(linha)
+                if m_valor:
+                    valor_str = m_valor.group(1)
+                    sinal = m_valor.group(2)
+                    valor = float(valor_str.replace(".", "").replace(",", "."))
+                    if sinal == "-":
+                        valor = -valor
 
-            try:
-                valor = float(valor_str.replace(".", "").replace(",", "."))
-            except:
-                continue
+                    if pendente_desc and len(pendente_desc) >= 3:
+                        if not any(x in pendente_desc for x in IGNORAR):
+                            transactions.append({
+                                "data": pendente_data,
+                                "descricao": pendente_desc,
+                                "valor": valor,
+                                "categoria": "Sem categoria"
+                            })
 
-            if sinal == "-":
-                valor = -valor
+                    pendente_data = None
+                    pendente_desc = None
+                    continue
 
-            
-            
-            print(f"{data} | {desc} | {valor}")
-
-            transactions.append({
-                "data": data,
-                "descricao": desc,
-                "valor": valor
-            })
-
-        print("="*120)
-        pass  # removed total print
-        print("="*120)
+                # Linha de texto intermediária: primeira = descrição, demais = cidade (ignora)
+                linha_upper = linha.upper()
+                if linha and not any(x in linha_upper for x in IGNORAR):
+                    if pendente_desc is None:
+                        pendente_desc = linha_upper
 
     except Exception as e:
-
-        print("Erro no parser Bradesco:", e)
+        print(f"Erro no parser Bradesco: {e}")
 
     return transactions
