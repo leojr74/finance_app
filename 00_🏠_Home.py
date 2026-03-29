@@ -122,10 +122,12 @@ if st.session_state.get("authentication_status"):
     """)
     
     st.info("""
-    **📥 Importação** Envie PDFs de faturas. O sistema detecta o banco e evita duplicatas automaticamente.
+    **📥 Importação de faturas ** Envie PDFs de faturas. O sistema detecta o banco e evita duplicatas automaticamente.
+
+    **📱 Importação de SMS ** Utilize SMS recebidos para manter as transações atualizadas. Suporte a upload de arquivos .txt e colagem direta.
 
     **✍️ Inclusão Manual** Registre gastos em dinheiro ou extras. Ideal para saques, PIX avulsos ou taxas.
-
+            
     **📑 Transações** Gerencie e categorize seus dados. Valide as sugestões de nossa IA e replique regras.
 
     **📈 Dashboard** Analise suas médias e totais. Visão macro com filtros específicos para Gastos Fixos.

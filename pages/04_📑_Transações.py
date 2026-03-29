@@ -41,7 +41,8 @@ def aplicar_inteligencia_json(df):
     return df_copy
 
 # --- 3. TÍTULO E CARREGAMENTO ---
-st.title("📑 Gerenciamento de Transações")
+st.title("📑 Transações")
+st.subheader("Edição, exclusão, categorização e ações em massa")
 
 if "df_transacoes" not in st.session_state:
     df = carregar_transacoes(usuario_atual) 
