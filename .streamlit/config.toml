@@ -7,6 +7,3 @@ font = "sans serif"
 
 [server]
 headless = true
-cookieSameSite = "Lax"
-cookieSecure = false      # true se https; false em dev local
-enableCORS = true
