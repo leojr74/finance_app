@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, timedelta
 import altair as alt
 from database import (
     carregar_transacoes,
@@ -66,11 +66,27 @@ if df_trans is None:
 df_trans = df_trans[df_trans["categoria"] != "Descontos"]
 df_trans["data"] = pd.to_datetime(df_trans["data"], errors="coerce")
 
-# Cálculo da Média Histórica
+# --- NOVO CÁLCULO DE MÉDIA (ÚLTIMOS 5 MESES) ---
 if not df_trans.empty:
-    df_trans["mes_ref"] = df_trans["data"].dt.to_period("M")
-    media_hist = df_trans.groupby(["categoria", "mes_ref"])["valor"].sum().reset_index()
-    media_hist = media_hist.groupby("categoria")["valor"].mean().reset_index().rename(columns={"valor": "media"})
+    # 1. Define o período: do início do mês atual para trás
+    primeiro_dia_mes_atual = date.today().replace(day=1)
+    # Aproximadamente 5 meses (155 dias para garantir os meses cheios)
+    data_corte = (primeiro_dia_mes_atual - timedelta(days=155)).replace(day=1)
+    
+    # 2. Filtra apenas o histórico recente (exclui o mês atual para a média ser justa)
+    df_recent = df_trans[
+        (df_trans["data"].dt.date >= data_corte) & 
+        (df_trans["data"].dt.date < primeiro_dia_mes_atual)
+    ].copy()
+    
+    if not df_recent.empty:
+        # Soma por Mês/Ano e Categoria
+        df_recent["mes_ref"] = df_recent["data"].dt.to_period("M")
+        media_hist = df_recent.groupby(["categoria", "mes_ref"])["valor"].sum().reset_index()
+        # Tira a média dos totais mensais
+        media_hist = media_hist.groupby("categoria")["valor"].mean().reset_index().rename(columns={"valor": "media"})
+    else:
+        media_hist = pd.DataFrame(columns=["categoria", "media"])
 else:
     media_hist = pd.DataFrame(columns=["categoria", "media"])
 
@@ -98,7 +114,7 @@ df_edit = st.data_editor(
     df_final[["categoria", "media", "valor_orc", "valor_real"]],
     column_config={
         "categoria": "Categoria",
-        "media": st.column_config.NumberColumn("Média Histórica", format="R$ %.2f", disabled=True),
+        "media": st.column_config.NumberColumn("Média (5 meses)", format="R$ %.2f", disabled=True),
         "valor_orc": st.column_config.NumberColumn("Meta Orçada (R$)", format="%.2f", min_value=0.0),
         "valor_real": st.column_config.NumberColumn("Gasto Realizado", format="R$ %.2f", disabled=True),
     },

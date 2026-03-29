@@ -9,3 +9,4 @@ streamlit-authenticator==0.3.3
 PyYAML
 sqlalchemy
 python-dateutil
+fpdf==1.7.2

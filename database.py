@@ -312,22 +312,37 @@ def salvar_config_categoria(categoria, is_fixo, user_id):
 def salvar_orcamento(categoria, valor, mes, ano, user_id):
     engine = get_engine()
     with engine.begin() as conn:
-        # Busca se já existe o registro
-        result = conn.execute(text('''
+        # 1. Busca se já existe o registro
+        # Corrigido: text() recebe apenas a string, os parâmetros vão no execute()
+        query_check = text('''
             SELECT id FROM orcamentos 
             WHERE categoria = :c AND mes = :m AND ano = :a AND user_id = :u
-        ''', {"c": categoria, "m": mes, "a": ano, "u": user_id})).fetchone()
+        ''')
+        
+        result = conn.execute(query_check, {
+            "c": categoria, 
+            "m": mes, 
+            "a": ano, 
+            "u": user_id
+        }).fetchone()
         
         if result:
-            # Update
-            conn.execute(text("UPDATE orcamentos SET valor = :v WHERE id = :id"), 
-                         {"v": valor, "id": result[0]})
+            # 2. Update
+            query_update = text("UPDATE orcamentos SET valor = :v WHERE id = :id")
+            conn.execute(query_update, {"v": valor, "id": result[0]})
         else:
-            # Insert
-            conn.execute(text('''
+            # 3. Insert
+            query_insert = text('''
                 INSERT INTO orcamentos (categoria, valor, mes, ano, user_id)
                 VALUES (:c, :v, :m, :a, :u)
-            ''', {"c": categoria, "v": valor, "m": mes, "a": ano, "u": user_id}))
+            ''')
+            conn.execute(query_insert, {
+                "c": categoria, 
+                "v": valor, 
+                "m": mes, 
+                "a": ano, 
+                "u": user_id
+            })
 
 def carregar_orcamentos(mes, ano, user_id):
     engine = get_engine()
