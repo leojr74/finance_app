@@ -5,6 +5,7 @@ from database import carregar_transacoes, get_authenticator, get_engine, save_al
 from categorizer import load_categories, add_rule, clean_description, find_category
 from ui import apply_global_style
 from sqlalchemy import text
+from utils.finance_tools import gerar_projeções_parcelas
 
 st.set_page_config(
     page_title="Gerenciamento de Transações",
@@ -71,16 +72,26 @@ with c1:
     df_temp = st.session_state.df_transacoes
     tem_dados = not df_temp.empty and df_temp["data"].notna().any()
     
-    min_banco = df_temp["data"].min().date() if tem_dados else hoje - timedelta(days=365)
-    max_banco = df_temp["data"].max().date() if tem_dados else hoje
+    # Menor data no banco para limitar o calendário no passado
+    min_calendario = df_temp["data"].min().date() if tem_dados else hoje - timedelta(days=365)
     
-    data_inicio_default = max(min_banco, hoje - timedelta(days=30))
+    # Maior data no banco (pode ser uma projeção futura)
+    max_calendario = df_temp["data"].max().date() if tem_dados else hoje
     
+    # GARANTIA: Se a maior projeção for antes de hoje, o limite é hoje. 
+    # Se houver projeções futuras, o calendário permite ir até lá.
+    limite_final_calendario = max(hoje, max_calendario)
+
+    # VALORES DEFAULT (O que aparece ao carregar a página)
+    # Início: 30 dias atrás | Fim: Hoje (ignora projeções futuras no carregamento)
+    data_inicio_default = hoje - timedelta(days=30)
+    data_fim_default = hoje
+
     periodo = st.date_input(
         "📅 Período", 
-        value=(data_inicio_default, max_banco), 
-        min_value=min_banco, 
-        max_value=max_banco,
+        value=(data_inicio_default, data_fim_default), 
+        min_value=min_calendario, 
+        max_value=limite_final_calendario,
         format="DD/MM/YYYY"
     )
 
@@ -167,46 +178,91 @@ df_editado = st.data_editor(
 
 # As edições são lidas diretamente de df_editado no botão salvar.
 
-# --- 7. AÇÕES EM MASSA ---
+# --- 7. AÇÕES EM MASSA E PARCELAMENTO ---
 
 st.write(f"Exibindo {len(df_para_editar)} transações.")
 
-# Criamos colunas para os botões ficarem lado a lado
+# Criamos colunas para os botões de seleção total
 col_sel1, col_sel2, _ = st.columns([1, 1, 4])
 
 with col_sel1:
     if st.button("✅ Selecionar Tudo", key="btn_sel_all"):
-        # Marcamos como True apenas as linhas que estão visíveis no filtro atual (df_display)
         st.session_state.df_transacoes.loc[df_display.index, "SEL"] = True
         st.rerun()
 
 with col_sel2:
     if st.button("🔲 Desmarcar Tudo", key="btn_desel_all"):
-        # Limpa a seleção de todas as transações do usuário
         st.session_state.df_transacoes["SEL"] = False
         st.rerun()
+
+# Identificação dos itens marcados
 if df_editado is not None and not df_editado.empty:
-    # Garante que o índice para as ações em massa seja o ID
+    # Garante que usamos o ID como referência para não errar a linha
     df_massa = df_editado.set_index("id")
     ids_marcados = df_massa[df_massa["SEL"] == True].index.tolist()
 else:
     ids_marcados = []
 
+# LÓGICA DE INTERFACE DINÂMICA
 if ids_marcados:
+    # CASO 1: APENAS UMA TRANSAÇÃO SELECIONADA (Habilita Parcelamento)
+    if len(ids_marcados) == 1:
+        id_sel = ids_marcados[0]
+        # Pegamos os dados da linha selecionada para exibir e processar
+        transacao_para_parcelar = st.session_state.df_transacoes.loc[id_sel].to_dict()
+        transacao_para_parcelar['id'] = id_sel
+
+        with st.container(border=True):
+            st.markdown("🗓️ **Desmembrar Compra Parcelada**")
+            st.caption(f"Item: {transacao_para_parcelar['descricao']} | Valor: R$ {transacao_para_parcelar['valor']:.2f}")
+            
+            cp1, cp2, cp3 = st.columns([1, 1, 1])
+            with cp1:
+                x = st.number_input("Parcela Atual", min_value=1, value=1, key="p_atual_v32")
+            with cp2:
+                y = st.number_input("de Total", min_value=x, value=12, key="p_total_v32")
+            with cp3:
+                st.write("##") # Alinhamento vertical
+                if st.button("🚀 Lançar Parcelas Futuras", width = 'stretch', key="btn_proj_v32"):
+                    from utils.finance_tools import gerar_projeções_parcelas
+                    from database import salvar_transacoes
+                    
+                    # 1. Gera as tuplas formatadas para o Postgres
+                    projeções = gerar_projeções_parcelas(
+                        transacao_para_parcelar, x, y, usuario_atual
+                    )
+                    
+                    # 2. Salva no banco (Inteligência do database.py)
+                    qtd_salva = salvar_transacoes(projeções, usuario_atual)
+                    
+                    if qtd_salva > 0:
+                        st.success(f"✅ {qtd_salva} parcelas futuras lançadas!")
+                        st.cache_data.clear()
+                        if "df_transacoes" in st.session_state:
+                            del st.session_state.df_transacoes
+                        st.rerun()
+
+    # CASO 2: AÇÕES EM MASSA (Uma ou mais transações)
     with st.container(border=True):
-        st.markdown(f"⚡ **Ações em Massa:** {len(ids_marcados)} itens")
+        st.markdown(f"⚡ **Ações em Massa:** {len(ids_marcados)} itens selecionados")
         c1, c2 = st.columns([2, 1])
+        
         with c1:
             cat_massa = st.selectbox("Mudar categoria:", ["---"] + lista_categorias, key="cat_massa_v32")
-            if cat_massa != "---" and st.button("Aplicar Agora", key="btn_massa_v32"):
+            if cat_massa != "---" and st.button("Aplicar Categoria", key="btn_massa_v32"):
                 st.session_state.df_transacoes.loc[ids_marcados, "categoria"] = cat_massa
                 st.session_state.df_transacoes.loc[ids_marcados, "SEL"] = False
                 st.rerun()
+                
         with c2:
-            st.write(" ") 
-            if st.button("🗑️ Excluir Selecionadas", type="secondary", key="btn_del_v32"):
-                st.session_state.df_transacoes.drop(ids_marcados, inplace=True)
-                st.rerun()
+            st.write("##") 
+            if st.button("🗑️ Excluir Selecionadas", type="secondary", key="btn_del_v32", width = 'stretch'):
+                # Importamos a função de deletar do seu database.py
+                from database import deletar_transacoes
+                if deletar_transacoes(ids_marcados, usuario_atual):
+                    st.session_state.df_transacoes.drop(ids_marcados, inplace=True)
+                    st.success("Itens excluídos!")
+                    st.rerun()
 
 # --- 8. SALVAMENTO E REPLICAÇÃO ---
 nova_cat_final = ""

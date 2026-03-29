@@ -56,7 +56,7 @@ texto_copiado = st.text_area(
     key=f"sms_input_{st.session_state.input_counter}"
 )
 
-btn_processar = st.button("🔍 Processar SMS", type="primary", use_container_width=True)
+btn_processar = st.button("🔍 Processar SMS", type="primary", width = 'stretch')
 
 if btn_processar:
     conteudo = ""
@@ -136,14 +136,14 @@ if st.session_state.df_sms_preview is not None:
     st.markdown("### Prévia das Transações")
     st.dataframe(
         df_sms[["data", "descricao", "valor", "banco"]],
-        use_container_width=True,
+        width = 'stretch',
         hide_index=True,
         column_config={
             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
             "valor": st.column_config.NumberColumn("R$", format="%.2f")
         }
     )
-    if st.button("💾 Salvar no Banco de Dados", use_container_width=True):
+    if st.button("💾 Salvar no Banco de Dados", width = 'stretch'):
         try:
             conn = conectar()
             if conn:

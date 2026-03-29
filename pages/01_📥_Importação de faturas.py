@@ -14,14 +14,11 @@ st.set_page_config(
     layout="wide"
 )
 
-authenticator = get_authenticator()
-authenticator.login(location='unrendered') 
-
-if not st.session_state.get("authentication_status"):
+from database import check_auth
+usuario_atual = check_auth()
+if usuario_atual is None:
     st.warning("Sessão expirada. Por favor, faça login na Home.")
-    st.stop()
-
-usuario_atual = st.session_state["username"] 
+    st.stop() 
 apply_global_style()
 
 from parser_router import extract_transactions_auto
