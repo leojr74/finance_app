@@ -18,11 +18,14 @@ st.set_page_config(
     layout="wide"
 )
 
-from database import check_auth
-usuario_atual = check_auth()
-if usuario_atual is None:
+authenticator = get_authenticator()
+authenticator.login(location='unrendered')
+
+if not st.session_state.get("authentication_status"):
     st.warning("Sessão expirada. Por favor, faça login na Home.")
-    st.stop() 
+    st.stop()
+
+usuario_atual = st.session_state["username"]
 apply_global_style()
 st.title("📊 Planejamento de Orçamento")
 
