@@ -17,9 +17,6 @@ st.set_page_config(
 # --------------------------------------------------
 authenticator = get_authenticator()
 authenticator.login(location='unrendered')
-st.write("auth_status:", st.session_state.get("authentication_status"))
-st.write("username:", st.session_state.get("username"))
-st.write("cookie presente:", "finance_cookie" in st.context.cookies if hasattr(st, 'context') else "n/a")
 
 if not st.session_state.get("authentication_status"):
     st.warning("Sessão expirada. Por favor, faça login na Home.")
