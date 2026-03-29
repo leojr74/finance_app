@@ -163,7 +163,10 @@ try:
             hide_index=True,
             column_config={
                 "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                "descricao": st.column_config.TextColumn("Descrição"),
+                "categoria": st.column_config.TextColumn("Categoria"),
                 "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f"),
+                "banco": st.column_config.TextColumn("Banco", disabled=True),
             }
         )
     else:
