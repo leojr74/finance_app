@@ -1,6 +1,11 @@
 import streamlit as st
 from importlib.metadata import version, PackageNotFoundError
-
+import yaml, os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+config_path = os.path.join(BASE_DIR, '..', 'config.yaml')
+with open(config_path) as f:
+    config = yaml.safe_load(f)
+st.write("config.yaml carregado:", config)
 st.title("🔧 Diagnóstico de Versões")
 
 pacotes = [
