@@ -6,7 +6,8 @@ import tempfile
 import calendar
 from datetime import date
 from ui import apply_global_style
-from database import conectar, get_authenticator, carregar_transacoes, verificar_duplicata
+from database import get_engine, get_authenticator, carregar_transacoes, verificar_duplicata
+from sqlalchemy import text
 
 st.set_page_config(
     page_title="Importação de Faturas",
@@ -109,143 +110,132 @@ if uploaded:
             
         if st.button("💾 Salvar no Banco", key="save_db_btn"):
             try:
-                conn = conectar()
-                if conn:
-                    # 1. Preparação para evitar duplicatas manuais
-                    df_existente = carregar_transacoes(usuario_atual)
-                    if not df_existente.empty:
-                        df_existente['data'] = pd.to_datetime(df_existente['data']).apply(lambda x: x.date())
-                        df_existente['valor'] = df_existente['valor'].astype(float)
+                engine = get_engine()
+                
+                # 1. Preparação para evitar duplicatas manuais
+                df_existente = carregar_transacoes(usuario_atual)
+                if not df_existente.empty:
+                    df_existente['data'] = pd.to_datetime(df_existente['data']).apply(lambda x: x.date())
+                    df_existente['valor'] = df_existente['valor'].astype(float)
 
-                    dados_para_inserir = []
-                    stats = {
-                        "novas": 0, 
-                        "duplicadas_manual": 0, 
-                        "duplicadas_fatura": 0, 
-                        "duplicadas_sms": 0
-                    }
+                stats = {
+                    "novas": 0, 
+                    "duplicadas_manual": 0, 
+                    "duplicadas_fatura": 0, 
+                    "duplicadas_sms": 0
+                }
 
-                    # Busca todos os hashes existentes de uma vez (evita 1 query por transação)
-                    with conn.cursor() as cursor:
-                        cursor.execute(
-                            "SELECT hash_fatura FROM transacoes WHERE user_id = %s AND hash_fatura IS NOT NULL",
-                            (usuario_atual,)
-                        )
-                        hashes_existentes = {row[0] for row in cursor.fetchall()}
+                # 2. Busca hashes existentes via SQLAlchemy
+                query_hashes = text("SELECT hash_fatura FROM transacoes WHERE user_id = :u AND hash_fatura IS NOT NULL")
+                with engine.connect() as conn:
+                    result_hashes = conn.execute(query_hashes, {"u": usuario_atual}).fetchall()
+                    hashes_existentes = {row[0] for row in result_hashes}
 
-                    with conn.cursor() as cursor:
-                        for _, row in df.iterrows():
-                            if pd.isna(row['data']): continue
+                dados_para_inserir = []
 
-                            # --- AJUSTE DE DATA PARA COMPETÊNCIA (Mês do Orçamento) ---
-                            # --- LOGICA DE DATAS (CORRIGIDA) ---
-                            data_orig_fatura = row['data'].date() if hasattr(row['data'], 'date') else row['data']
-                            
-                            # 1. Se a data já está no período informado, mantemos a original
-                            if data_inicio <= data_orig_fatura <= data_fim:
-                                data_ajustada = data_orig_fatura
+                # 3. Processamento do DataFrame
+                for _, row in df.iterrows():
+                    if pd.isna(row['data']): continue
+
+                    # --- LOGICA DE DATAS ---
+                    data_orig_fatura = row['data'].date() if hasattr(row['data'], 'date') else row['data']
+                    
+                    if data_inicio <= data_orig_fatura <= data_fim:
+                        data_ajustada = data_orig_fatura
+                    else:
+                        dia_transacao = data_orig_fatura.day
+                        mes_alvo = data_inicio.month
+                        ano_alvo = data_inicio.year
+
+                        if dia_transacao < data_inicio.day:
+                            if data_inicio.month == 12:
+                                mes_alvo, ano_alvo = 1, data_inicio.year + 1
                             else:
-                                # 2. Está fora do período (Parceladas), então ajustamos o mês/ano
-                                dia_transacao = data_orig_fatura.day
-                                mes_alvo = data_inicio.month
-                                ano_alvo = data_inicio.year
+                                mes_alvo = data_inicio.month + 1
 
-                                # Se o dia da compra é menor que o dia de início da fatura (ex: dia 02 vs início dia 17),
-                                # ela pertence ao segundo mês do período da fatura.
-                                if dia_transacao < data_inicio.day:
-                                    if data_inicio.month == 12:
-                                        mes_alvo = 1
-                                        ano_alvo = data_inicio.year + 1
-                                    else:
-                                        mes_alvo = data_inicio.month + 1
+                        try:
+                            data_ajustada = date(ano_alvo, mes_alvo, dia_transacao)
+                        except ValueError:
+                            ultimo_dia = calendar.monthrange(ano_alvo, mes_alvo)[1]
+                            data_ajustada = date(ano_alvo, mes_alvo, ultimo_dia)
 
-                                try:
-                                    data_ajustada = date(ano_alvo, mes_alvo, dia_transacao)
-                                except ValueError:
-                                    ultimo_dia = calendar.monthrange(ano_alvo, mes_alvo)[1]
-                                    data_ajustada = date(ano_alvo, mes_alvo, ultimo_dia)
+                    data_final_str = data_ajustada.strftime('%Y-%m-%d')
+                    desc_proc = str(row['descricao']).upper()
+                    # Mantém o sinal original do parser (negativo = crédito/pagamento)
+                    valor_proc = float(row['valor'])
+                    cat_proc = row.get('categoria') if pd.notna(row.get('categoria')) else "Sem categoria"
 
-                            data_final_str = data_ajustada.strftime('%Y-%m-%d')
-                            desc_proc = str(row['descricao']).upper()
-                            # Mantém o sinal original do parser (negativo = crédito/pagamento)
-                            valor_proc = float(row['valor'])
-                            cat_proc = row.get('categoria') if pd.notna(row.get('categoria')) else "Sem categoria"
+                    # Hash Único baseado na data AJUSTADA para o orçamento
+                    raw_str = f"{data_final_str}{valor_proc}{desc_proc}{banco_nome}{usuario_atual}"
+                    h_fatura = hashlib.md5(raw_str.encode()).hexdigest()
 
-                            # Hash Único baseado na data AJUSTADA para o orçamento
-                            raw_str = f"{data_final_str}{valor_proc}{desc_proc}{banco_nome}{usuario_atual}"
-                            h_fatura = hashlib.md5(raw_str.encode()).hexdigest()
+                    # --- VALIDAÇÃO 1: HASH (Fatura já importada) ---
+                    if h_fatura in hashes_existentes:
+                        stats["duplicadas_fatura"] += 1
+                        continue
 
-                            # --- VALIDAÇÃO 1: HASH (Fatura já importada) ---
-                            if h_fatura in hashes_existentes:
-                                stats["duplicadas_fatura"] += 1
-                                continue
+                    # 2. VALIDAÇÃO PRIORIDADE 2 & 3: BUSCA POR SIMILARIDADE (Data + Valor + Banco)
 
-                            # 2. VALIDAÇÃO PRIORIDADE 2 & 3: BUSCA POR SIMILARIDADE (Data + Valor + Banco)
+                    is_dup = False
+                    if not df_existente.empty:
+                        matches = df_existente[
+                            (df_existente['data'] == data_ajustada) & 
+                            (df_existente['valor'].round(2) == round(valor_proc, 2)) & 
+                            (df_existente['banco'] == banco_nome)
+                        ]
+                        if not matches.empty:
+                            # VERIFICAÇÃO SE É SMS: 
+                            # Se o match possuir um hash e esse hash NÃO for 'MANUAL_ENTRY', é SMS.
+                            es_sms = matches['hash_fatura'].apply(
+                                lambda x: x not in [None, '', 'MANUAL_ENTRY']
+                            ).any()
 
-                            is_dup = False
-                            if not df_existente.empty:
-                                matches = df_existente[
-                                    (df_existente['data'] == data_ajustada) & 
-                                    (df_existente['valor'].round(2) == round(valor_proc, 2)) & 
-                                    (df_existente['banco'] == banco_nome)
-                                ]
-                                if not matches.empty:
-                                    # VERIFICAÇÃO SE É SMS: 
-                                    # Se o match possuir um hash e esse hash NÃO for 'MANUAL_ENTRY', é SMS.
-                                    es_sms = matches['hash_fatura'].apply(
-                                        lambda x: x not in [None, '', 'MANUAL_ENTRY']
-                                    ).any()
+                            if es_sms:
+                                stats["duplicadas_sms"] += 1
+                            else:
+                                stats["duplicadas_manual"] += 1
+                            is_dup = True
 
-                                    if es_sms:
-                                        stats["duplicadas_sms"] += 1
-                                    else:
-                                        stats["duplicadas_manual"] += 1
-                                    is_dup = True
+                    if is_dup:
+                        continue # Pula a inserção para duplicatas de SMS ou Manual
 
-                            if is_dup:
-                                continue # Pula a inserção para duplicatas de SMS ou Manual
+                    stats["novas"] += 1
+                    dados_para_inserir.append((
+                        data_final_str, desc_proc, cat_proc, valor_proc, 
+                        banco_nome, usuario_atual, h_fatura
+                    ))
 
-                            stats["novas"] += 1
-                            dados_para_inserir.append((
-                                data_final_str, desc_proc, cat_proc, valor_proc, 
-                                banco_nome, usuario_atual, h_fatura
-                            ))
-
-                            
-                        # 2. Execução do salvamento em lote
-                        if dados_para_inserir:
-                            from psycopg2.extras import execute_batch
-                            query = '''
-                                INSERT INTO transacoes (data, descricao, categoria, valor, banco, user_id, hash_fatura)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                            '''
-                            execute_batch(cursor, query, dados_para_inserir)
-                            conn.commit()
-                            st.success(f"✅ {stats['novas']} novas transações importadas com sucesso!")
                         
-                        # 3. Feedbacks detalhados
-                        if stats["duplicadas_sms"] > 0:
-                            st.info(f"📲 {stats['duplicadas_sms']} transações ignoradas: Já foram capturadas via SMS.")
+                # 4. Execução do salvamento em lote
+                if dados_para_inserir:
+                    query_insert = text("""
+                    INSERT INTO transacoes (data, descricao, categoria, valor, banco, user_id, hash_fatura)
+                    VALUES (:d, :desc, :c, :v, :b, :u, :h)
+                """)
+                with engine.begin() as conn:
+                    conn.execute(query_insert, dados_para_inserir)
+                st.success(f"✅ {stats['novas']} novas transações importadas com sucesso!")
 
-                        if stats["duplicadas_manual"] > 0:
-                            st.info(f"📌 {stats['duplicadas_manual']} transações ignoradas (já existem lançamentos manuais no mesmo dia).")
-                        
-                        if stats["duplicadas_fatura"] > 0:
-                            st.warning(f"🚫 {stats['duplicadas_fatura']} transações já constavam em importações anteriores.")
+                # 5. Feedbacks 
+                if stats["duplicadas_sms"] > 0:
+                    st.info(f"📲 {stats['duplicadas_sms']} transações ignoradas: Já foram capturadas via SMS.")
 
-                        if stats["novas"] == 0 and sum(v for k, v in stats.items() if k != "novas") == 0:
-                            st.warning("Nenhuma transação encontrada no arquivo.")
+                if stats["duplicadas_manual"] > 0:
+                    st.info(f"📌 {stats['duplicadas_manual']} transações ignoradas (já existem lançamentos manuais no mesmo dia).")
+                
+                if stats["duplicadas_fatura"] > 0:
+                    st.warning(f"🚫 {stats['duplicadas_fatura']} transações já constavam em importações anteriores.")
 
-                        # Limpa cache para atualizar página de transações
-                        if 'df_transacoes' in st.session_state:
-                            del st.session_state.df_transacoes
+                if stats["novas"] == 0 and sum(v for k, v in stats.items() if k != "novas") == 0:
+                    st.warning("Nenhuma transação encontrada no arquivo.")
+
+                # Limpa cache para atualizar página de transações
+                if 'df_transacoes' in st.session_state:
+                    del st.session_state.df_transacoes
 
             except Exception as e:
-                if conn: conn.rollback()
-                st.error(f"Erro ao salvar no banco: {e}")
-            finally:
-                if conn: conn.close()
-                    
+                st.error(f"❌ Erro ao salvar no banco: {e}")
+                                
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
     finally:

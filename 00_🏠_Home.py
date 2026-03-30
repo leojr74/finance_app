@@ -3,7 +3,7 @@ import streamlit_authenticator as stauth
 import os
 import yaml
 from ui import apply_global_style
-from categorizer import load_categories
+from categorizer import get_all_rules
 from database import carregar_usuarios_db, salvar_novo_usuario_db, criar_tabela
 
 st.set_page_config(
@@ -164,7 +164,7 @@ if st.session_state.get("authentication_status"):
         categorias_base = {"Alimentação", "Transporte", "Saúde", "Lazer", "Moradia", "Supermercado"}
 
         try:
-            rules = load_categories()
+            rules = get_all_rules(usuario_atual)
             cats_json = set(str(v) for v in rules.values() if v)
         except:
             cats_json = set()
