@@ -1,5 +1,5 @@
 import streamlit as st
-import pkg_resources
+from importlib.metadata import version, PackageNotFoundError
 
 st.title("🔧 Diagnóstico de Versões")
 
@@ -20,7 +20,7 @@ pacotes = [
 
 for p in pacotes:
     try:
-        v = pkg_resources.get_distribution(p).version
+        v = version(p)
         st.write(f"**{p}**: `{v}`")
-    except Exception:
+    except PackageNotFoundError:
         st.warning(f"{p}: não encontrado")
