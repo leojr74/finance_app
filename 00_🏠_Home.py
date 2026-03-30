@@ -63,7 +63,6 @@ if not st.session_state.get("authentication_status"):
             try:
                 resultado = authenticator.register_user(
                     location='main',
-                    pre_authorized=None,
                     fields={
                         'Form name': 'Criar Conta',
                         'First name': 'Nome',
