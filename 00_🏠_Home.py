@@ -34,6 +34,7 @@ authenticator = stauth.Authenticate(
     cookie_name=config['cookie']['name'],
     cookie_key=cookie_key,
     cookie_expiry_days=config['cookie']['expiry_days'], # MUDOU: era cookie_expiry_days
+    validator=None
 )
 
 # --- INTERFACE DE ACESSO (LOGIN / CADASTRO) ---
