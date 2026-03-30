@@ -4,7 +4,7 @@ import os
 import yaml
 from ui import apply_global_style
 from categorizer import load_categories
-from database import carregar_usuarios_db, check_auth, salvar_novo_usuario_db, criar_tabela
+from database import carregar_usuarios_db, salvar_novo_usuario_db, criar_tabela
 
 st.set_page_config(
     page_title="Finanças Pessoais",
