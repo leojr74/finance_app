@@ -1,6 +1,10 @@
 import streamlit as st
 from importlib.metadata import version, PackageNotFoundError
 import yaml, os
+import inspect
+import streamlit_authenticator as stauth
+src = inspect.getsource(stauth.Authenticate.register_user)
+st.code(src)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(BASE_DIR, '..', 'config.yaml')
 with open(config_path) as f:
