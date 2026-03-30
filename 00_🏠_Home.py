@@ -48,6 +48,7 @@ if not st.session_state.get("authentication_status"):
         with tab_login:
             authenticator.login(
                 location='main',
+                pre_authorized=[],
                 fields={
                     'Form name': 'Acesso',
                     'Username': 'Email',    # Substitui "Username" por "Email"
