@@ -1,8 +1,8 @@
 
 import datetime
 import logging
+from turtle import st
 import bank_detector
-from categorizer import load_categories, find_category
 
 from parsers import (
     bb,
@@ -76,7 +76,6 @@ def reconstruir_data(data_raw, data_inicio, data_fim, descricao=""):
 
 def normalizar_transacoes(raw_transactions, data_inicio, data_fim):
 
-    categorias = load_categories()
     normalizadas = []
 
     for t in raw_transactions:
@@ -99,18 +98,12 @@ def normalizar_transacoes(raw_transactions, data_inicio, data_fim):
         if not data_final:
             continue
 
-        categoria_inteligente = find_category(desc, categorias)
         
-        if not categoria_inteligente:
-            categoria_final = "Sem categoria"
-        else:
-            categoria_final = categoria_inteligente
 
         normalizadas.append({
             "data": data_final.strftime("%d/%m/%Y"),
             "descricao": desc,
-            "valor": valor,
-            "categoria": categoria_final # Agora garantimos que vem do seu JSON
+            "valor": valor
         })
 
     return normalizadas

@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
-from categorizer import load_categories, find_category
+from categorizer import get_all_rules, find_category
 from ui import apply_global_style
-from database import conectar, get_authenticator
+from database import get_engine, get_authenticator
+from sqlalchemy import text
 
 st.set_page_config(
     page_title="Inclusão Manual de Transações",
@@ -27,21 +28,25 @@ st.title("✍️ Inclusão Manual de Transações")
 st.markdown(f"Registre gastos para a conta de **{st.session_state['name']}**.")
 
 # --- 1. CARREGAMENTO DE OPÇÕES (BANCOS E CATEGORIAS) ---
-rules = load_categories()
+rules = get_all_rules(usuario_atual)
 
 # Busca bancos existentes no banco de dados FILTRADOS pelo usuário
 try:
-    conn = conectar()
-    cursor = conn.cursor()
-    # Adicionado filtro de user_id para não sugerir bancos de terceiros
-    cursor.execute("""
-        SELECT DISTINCT banco 
-        FROM transacoes 
-        WHERE banco IS NOT NULL AND banco != '' AND user_id = %s
-    """, (usuario_atual,))
-    bancos_no_db = [row[0] for row in cursor.fetchall()]
-    conn.close()
-except:
+    engine = get_engine()
+    # Usamos connect() pois é uma operação de leitura simples (SELECT)
+    with engine.connect() as conn:
+        query = text("""
+            SELECT DISTINCT banco 
+            FROM transacoes 
+            WHERE banco IS NOT NULL 
+              AND banco != '' 
+              AND user_id = :u
+        """)
+        result = conn.execute(query, {"u": usuario_atual}).fetchall()
+        # O row[0] continua acessando a primeira (e única) coluna da query
+        bancos_no_db = [row[0] for row in result]
+except Exception as e:
+    # Em caso de erro (ex: tabela não existe ainda), retornamos lista vazia
     bancos_no_db = []
 
 # Lista dinâmica de bancos
@@ -101,7 +106,7 @@ with st.container(border=True):
 
         submit = st.form_submit_button("💾 Salvar Transação", type="primary")
 
-# --- 4. LÓGICA DE SALVAMENTO ---
+# --- 4. LÓGICA DE SALVAMENTO (MANUAL) ---
 if submit:
     banco_final = novo_banco_nome if banco_sel == "➕ Adicionar novo banco..." else banco_sel
     
@@ -111,55 +116,70 @@ if submit:
         st.error("❌ Digite o nome do novo banco para continuar.")
     else:
         try:
-            conn = conectar()
-            cursor = conn.cursor()
+            from database import get_engine
+            from sqlalchemy import text
             
-            # INSERÇÃO INCLUINDO O USER_ID
-            cursor.execute("""
+            engine = get_engine()
+            
+            # Preparamos a query com parâmetros nomeados (:)
+            query = text("""
                 INSERT INTO transacoes (data, descricao, valor, categoria, banco, hash_fatura, user_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (
-                data_ins.strftime("%Y-%m-%d"),
-                desc_ins,
-                valor_ins,
-                categoria_ins,
-                banco_final,
-                "MANUAL_ENTRY",
-                usuario_atual
-            ))
+                VALUES (:data, :desc, :valor, :cat, :banco, :hash, :user)
+            """)
             
-            conn.commit()
-            conn.close()
+            # O dicionário de dados para a inserção
+            dados_manual = {
+                "data": data_ins.strftime("%Y-%m-%d"),
+                "desc": desc_ins,
+                "valor": valor_ins,
+                "cat": categoria_ins,
+                "banco": banco_final,
+                "hash": "MANUAL_ENTRY",
+                "user": usuario_atual
+            }
             
+            # Executa com commit automático via engine.begin()
+            with engine.begin() as conn:
+                conn.execute(query, dados_manual)
+            
+            # Limpa o cache para forçar a atualização da tabela de visualização
             if "df_transacoes" in st.session_state:
                 del st.session_state.df_transacoes
             
-            st.success(f"✅ Transação salva com sucesso!")
+            st.success("✅ Transação salva com sucesso!")
             st.rerun()
             
         except Exception as e:
             st.error(f"⚠️ Erro ao acessar o banco de dados: {e}")
-
 # --- 5. VISUALIZAÇÃO DOS ÚLTIMOS LANÇAMENTOS ---
 st.write("---")
 st.subheader("📋 Seus Últimos Lançamentos Manuais")
 
 try:
-    conn = conectar()
-    # FILTRO: Apenas transações manuais DESTE usuário
-    df_recent = pd.read_sql_query("""
+    from database import get_engine
+    from sqlalchemy import text
+    
+    engine = get_engine()
+    
+    # Query adaptada para o padrão SQLAlchemy (:u em vez de %s)
+    query_recente = text("""
         SELECT data, descricao, valor, categoria, banco 
         FROM transacoes 
-        WHERE hash_fatura = 'MANUAL_ENTRY' AND user_id = %s
+        WHERE hash_fatura = 'MANUAL_ENTRY' AND user_id = :u
         ORDER BY id DESC LIMIT 5
-    """, conn, params=(usuario_atual,))
-    conn.close()
+    """)
+    
+    # Com SQLAlchemy, o pandas precisa que a conexão seja aberta explicitamente
+    with engine.connect() as conn:
+        df_recent = pd.read_sql_query(query_recente, conn, params={"u": usuario_atual})
     
     if not df_recent.empty:
+        # Garante que a coluna de data seja tratada corretamente pelo pandas
         df_recent["data"] = pd.to_datetime(df_recent["data"])
+        
         st.dataframe(
             df_recent, 
-            width = 'stretch', 
+            use_container_width=True, # Atualizado de 'stretch' para o padrão moderno
             hide_index=True,
             column_config={
                 "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
@@ -171,5 +191,6 @@ try:
         )
     else:
         st.info("Nenhuma transação manual encontrada para o seu usuário.")
+
 except Exception as e:
-    st.warning("Não foi possível carregar o histórico recente.")
+    st.warning(f"Não foi possível carregar o histórico recente. Erro: {e}")

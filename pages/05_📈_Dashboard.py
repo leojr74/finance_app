@@ -6,7 +6,7 @@ from fpdf import FPDF
 import io
 from database import carregar_transacoes, get_authenticator, get_gastos_fixos
 from ui import apply_global_style
-from categorizer import load_categories
+from categorizer import get_all_rules
 
 st.set_page_config(
     page_title="Dashboard Financeiro",
@@ -78,7 +78,7 @@ df["valor"] = pd.to_numeric(df["valor"], errors='coerce')
 
 # 3. FILTRO DE CATEGORIAS
 try:
-    rules = load_categories()
+    rules = get_all_rules(usuario_atual)
     categorias_json = set(str(v) for v in rules.values() if v)
 except:
     categorias_json = set()

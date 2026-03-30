@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-from database import carregar_transacoes, get_authenticator, get_engine, save_all_changes, deletar_transacoes
-from categorizer import load_categories, add_rule, clean_description, find_category
+from database import carregar_transacoes, get_authenticator, get_engine, save_all_changes, deletar_transacoes, carregar_regras_db, salvar_regra_db
+from categorizer import get_all_rules, add_rule, clean_description, find_category
 from ui import apply_global_style
 from sqlalchemy import text
 from utils.finance_tools import gerar_projeções_parcelas
@@ -31,7 +31,7 @@ def limpar_descricao_cached(descricao):
 
 def aplicar_inteligencia_json(df):
     df_copy = df.copy()
-    rules = load_categories()
+    rules = carregar_regras_db(st.session_state["username"])
     mask = (df_copy["categoria"] == "Sem categoria") | (df_copy["categoria"].isna())
     
     if mask.any():
@@ -97,7 +97,7 @@ with c1:
     )
 
 with c2:
-    rules_filt = load_categories()
+    rules_filt = get_all_rules(st.session_state["username"])
     cats_do_json = set(str(v) for v in rules_filt.values() if v)
     cats_no_df = set(st.session_state.df_transacoes["categoria"].unique())
     lista_filtro = sorted(cats_do_json.union(cats_no_df).union({"Sem categoria"}))
@@ -132,7 +132,7 @@ if busca:
     df_display = df_display[df_display["descricao"].str.contains(busca, na=False, case=False)]
 
 # --- 6. PREPARAÇÃO DO EDITOR ---
-rules = load_categories()
+rules = get_all_rules(st.session_state["username"])
 categorias_do_json = set(str(v) for v in rules.values() if v)
 categorias_no_df = set(st.session_state.df_transacoes["categoria"].unique()) if not st.session_state.df_transacoes.empty else set()
 categorias_fixas = {"Alimentação", "Transporte", "Saúde", "Lazer", "Moradia", "Supermercado", "Sem categoria"}
@@ -291,7 +291,7 @@ with b1:
                             # Se você alterou a categoria para uma já existente
                             if cat_selecionada != "➕ Adicionar nova..." and cat_selecionada != cat_anterior:
                                 # A) Aprende no JSON
-                                add_rule(desc_atual, cat_selecionada)
+                                salvar_regra_db(desc_atual, cat_selecionada, usuario_atual)
                                 
                                 # B) PROPAGAÇÃO IMEDIATA NA TELA (Session State)
                                 # Isso faz com que todos os "UBER" virem "Transporte" antes de salvar
@@ -311,7 +311,7 @@ with b1:
                     descricoes_para_nova = st.session_state.df_transacoes.loc[mask_nova, "descricao"].unique()
                     
                     for d in descricoes_para_nova:
-                        add_rule(d, nova_cat_final)
+                        salvar_regra_db(d, nova_cat_final, usuario_atual)
                     
                     # Aplica o nome da nova categoria em todas as linhas correspondentes
                     st.session_state.df_transacoes.loc[mask_nova, "categoria"] = nova_cat_final
@@ -363,3 +363,4 @@ with b2:
         if "original_transaction_ids" in st.session_state:
             del st.session_state.original_transaction_ids
         st.rerun()
+
