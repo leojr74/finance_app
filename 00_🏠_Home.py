@@ -48,7 +48,6 @@ if not st.session_state.get("authentication_status"):
         with tab_login:
             authenticator.login(
                 location='main',
-                pre_authorized=[],
                 fields={
                     'Form name': 'Acesso',
                     'Username': 'Email',    # Substitui "Username" por "Email"
@@ -65,6 +64,7 @@ if not st.session_state.get("authentication_status"):
             try:
                 resultado = authenticator.register_user(
                     location='main',
+                    pre_authorized=[],
                     fields={
                         'Form name': 'Criar Conta',
                         'First name': 'Nome',
