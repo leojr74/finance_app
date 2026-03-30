@@ -64,7 +64,8 @@ if not st.session_state.get("authentication_status"):
             try:
                 resultado = authenticator.register_user(
                     location='main',
-                    pre_authorized=[],
+                    pre_authorization=False,  # <-- nome correto + False para liberar cadastro
+                    captcha=False,
                     fields={
                         'Form name': 'Criar Conta',
                         'First name': 'Nome',
