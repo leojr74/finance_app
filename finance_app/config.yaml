@@ -1,0 +1,6 @@
+cookie:
+  expiry_days: 30
+  name: finance_cookie
+  key: REMOVIDO
+credentials:
+  usernames: {}
