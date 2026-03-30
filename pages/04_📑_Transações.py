@@ -56,13 +56,13 @@ if "df_transacoes" not in st.session_state:
         # Track original IDs for deletion detection
         st.session_state.original_transaction_ids = set(df["id"].tolist())
     else:
-        st.session_state.df_transacoes = pd.DataFrame(
-            columns=["SEL", "data", "descricao", "categoria", "valor", "banco"]
+        df_vazio = pd.DataFrame(
+            columns=["id", "SEL", "data", "descricao", "categoria", "valor", "banco", "hash_fatura", "user_id"]
         ).set_index("id")
+        df_vazio["data"] = pd.to_datetime(df_vazio["data"])
+        st.session_state.df_transacoes = df_vazio
         st.session_state.original_transaction_ids = set()
-        st.session_state.df_transacoes["data"] = pd.to_datetime(st.session_state.df_transacoes["data"])
-        
-        st.info("Nenhuma transação encontrada para este usuário.")
+        st.info("📭 Nenhuma transação encontrada. Importe uma fatura, um SMS ou adicione um lançamento manual.")
 
 # --- 4. FILTROS DE INTERFACE ---
 st.write("---")

@@ -30,10 +30,10 @@ config['credentials'] = carregar_usuarios_db()
 cookie_key = st.secrets["auth"]["cookie_key"]
 
 authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    cookie_key,
-    config['cookie']['expiry_days']
+    credentials=config['credentials'],
+    cookie_name=config['cookie']['name'],
+    cookie_key=cookie_key,
+    cookie_expiry_days=config['cookie']['expiry_days'], # MUDOU: era cookie_expiry_days
 )
 
 # --- INTERFACE DE ACESSO (LOGIN / CADASTRO) ---
@@ -61,30 +61,46 @@ if not st.session_state.get("authentication_status"):
 
         with tab_signup:
             try:
-                
-                resultado = authenticator.register_user(location='main')
-                
-                if resultado:
-                    
+                resultado = authenticator.register_user(
+                    location='main',
+                    pre_authorized=None,
+                    fields={
+                        'Form name': 'Criar Conta',
+                        'First name': 'Nome',
+                        'Last name': 'Sobrenome',
+                        'Email': 'Email',
+                        'Username': 'Usuário',
+                        'Password': 'Senha',
+                        'Repeat password': 'Repetir Senha',
+                        'Register': 'Cadastrar'
+                    }
+                )
+
+                if resultado and resultado[1]:
                     email_novo, username_novo, nome_novo = resultado
-                    
-                    if username_novo:
-                        senha_para_salvar = config['credentials']['usernames'][username_novo]['password']
-    
+
+                    # O authenticator registra com username como chave temporariamente.
+                    # Buscamos a senha por username, mas salvamos e logamos por email.
+                    user_data = config['credentials']['usernames'].get(username_novo)
+
+                    if user_data:
+                        senha_para_salvar = user_data['password']
+
                         sucesso_db = salvar_novo_usuario_db(
-                            username=username_novo,
+                            username=email_novo,   # <-- salva o EMAIL no campo username do banco
                             email=email_novo,
                             name=nome_novo,
-                            password_hashed=senha_para_salvar 
+                            password_hashed=senha_para_salvar
                         )
-                        
+
                         if sucesso_db:
-                            st.success(f'✅ Conta para {nome_novo} criada com sucesso no banco de dados!')
+                            st.success(f'✅ Conta para {nome_novo} criada com sucesso!')
                             st.info("Acesse a aba 'Entrar' para começar.")
                             st.balloons()
-                            
+                    else:
+                        st.error("Erro ao recuperar senha. Tente novamente.")
+
             except Exception as e:
-                # Ignora erros visuais de formulário vazio
                 if "NoneType" not in str(e):
                     st.error(f"Erro no processo de cadastro: {e}")
 
