@@ -145,36 +145,3 @@ if submit:
             
         except Exception as e:
             st.error(f"⚠️ Erro ao acessar o banco de dados: {e}")
-# --- 5. VISUALIZAÇÃO DOS ÚLTIMOS LANÇAMENTOS ---
-st.write("---")
-st.subheader("📋 Seus Últimos Lançamentos Manuais")
-
-try:
-    engine = get_engine()
-    # FILTRO: Apenas transações manuais DESTE usuário
-    df_recent = pd.read_sql_query("""
-        SELECT data, descricao, valor, categoria, banco 
-        FROM transacoes 
-        WHERE hash_fatura = 'MANUAL_ENTRY' AND user_id = %s
-        ORDER BY id DESC LIMIT 5
-    """, conn, params=(usuario_atual,))
-    conn.close()
-    
-    if not df_recent.empty:
-        df_recent["data"] = pd.to_datetime(df_recent["data"])
-        st.dataframe(
-            df_recent, 
-            width = 'stretch', 
-            hide_index=True,
-            column_config={
-                "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-                "descricao": st.column_config.TextColumn("Descrição"),
-                "categoria": st.column_config.TextColumn("Categoria"),
-                "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f"),
-                "banco": st.column_config.TextColumn("Banco", disabled=True),
-            }
-        )
-    else:
-        st.info("Nenhuma transação manual encontrada para o seu usuário.")
-except Exception as e:
-    st.warning("Não foi possível carregar o histórico recente.")
