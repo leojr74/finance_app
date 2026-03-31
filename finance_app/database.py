@@ -18,21 +18,27 @@ def get_engine():
     return create_engine(db_url, pool_pre_ping=True)
 
 def get_authenticator():
-    """Retorna o objeto de autenticação configurado para validar cookies."""
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(BASE_DIR, 'config.yaml')
+    """
+    Retorna o objeto de autenticação configurado sem depender de arquivos YAML.
+    """
+    # 1. Busca as credenciais diretamente do Banco de Dados (Supabase/Postgres)
+    credentials = carregar_usuarios_db()
     
-    with open(config_path) as file:
-        config = yaml.load(file, Loader=yaml.SafeLoader)
+    # 2. Configurações que antes ficavam no YAML, agora ficam direto no código
+    cookie_name = "finance_app_cookie"
+    cookie_expiry_days = 30 
     
-    from database import carregar_usuarios_db
-    config['credentials'] = carregar_usuarios_db()
+    # 3. Busca a chave mestra do seu secrets.toml
+    # Certifique-se que existe [auth] cookie_key = "sua_chave" no seu secrets
+    cookie_key = st.secrets["auth"]["cookie_key"]
     
+    # 4. Retorna o objeto Authenticate configurado
     return stauth.Authenticate(
-        config['credentials'],
-        config['cookie']['name'],
-        st.secrets["auth"]["cookie_key"],
-        config['cookie']['expiry_days']
+        credentials=credentials,
+        cookie_name=cookie_name,
+        cookie_key=cookie_key,
+        cookie_expiry_days=cookie_expiry_days,
+        validator=None # Opcional, dependendo da versão do seu streamlit-authenticator
     )
 
 def criar_tabela():
