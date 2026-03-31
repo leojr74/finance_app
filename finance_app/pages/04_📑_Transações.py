@@ -338,7 +338,7 @@ with b1:
 
                 # 3. REMOVER TRANSAÇÕES EXCLUÍDAS
                 current_ids = set(st.session_state.df_transacoes.index)
-                original_ids = st.session_state.get("original_transaction_ids", set())
+                original_ids = set(st.session_state.get("original_transaction_ids", []))
                 deleted_ids = original_ids - current_ids
                 if deleted_ids:
                     deletar_transacoes(list(deleted_ids), usuario_atual)

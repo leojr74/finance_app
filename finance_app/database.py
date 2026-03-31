@@ -8,6 +8,7 @@ import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module='pandas')
 
+@st.cache_resource
 def get_engine():
     """Retorna o engine do SQLAlchemy com pool de conexões configurado."""
     if "postgres" not in st.secrets:
