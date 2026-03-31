@@ -41,7 +41,8 @@ MAPA_SMS = {
     "ITAU": "CARTÃO ITAÚ",
     "NUBANK": "CARTÃO NUBANK",
     "BRADESCO": "CARTÃO BRADESCO",
-    "SANTANDER": "CARTÃO SANTANDER"
+    "SANTANDER": "CARTÃO SANTANDER",
+    "AMAZON": "CARTÃO AMAZON"
 }
 
 # --------------------------------------------------
@@ -81,46 +82,61 @@ if btn_processar:
         for bloco in blocos:
             if not bloco.strip(): continue
             
-
-            # Regex Híbrido: Tenta metadados (arquivo) ou data direta (texto colado)
+            # 1. Tenta metadados do arquivo (Data/Hora de recebimento)
             match_meta = re.search(r"Recebido de .+ em (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})", bloco)
-            match_compra = re.search(r"(\w+): Compra (aprovada|CANCELADA|no) (.*?) R\$ ([\d\.,]+) (\d{2}/\d{2})", bloco, re.IGNORECASE)
             
-            if match_compra:
-                banco_raw = match_compra.group(1).upper()
-                status = match_compra.group(2).upper()
-                estabelecimento = match_compra.group(3).strip().upper()
-                valor_str = match_compra.group(4).replace('.', '').replace(',', '.')
-                data_sms = match_compra.group(5) # DD/MM
-                
-                # Define a data e hora
-                if match_meta:
-                    data_iso = match_meta.group(1)
-                    hora_min = match_meta.group(2)
-                else:
-                    ano_atual = datetime.now().year
-                    data_iso = datetime.strptime(f"{data_sms}/{ano_atual}", "%d/%m/%Y").strftime('%Y-%m-%d')
-                    hora_min = datetime.now().strftime("%H:%M") # Hora atual se colado
+            # --- PADRÃO 1: CAIXA, ITAU, NUBANK (O que você já tinha) ---
+            match_padrao = re.search(r"(\w+): Compra (aprovada|CANCELADA|no) (.*?) R\$ ([\d\.,]+) (\d{2}/\d{2})", bloco, re.IGNORECASE)
+            
+            # --- PADRÃO 2: CARTÃO AMAZON (NOVO) ---
+            # Ex: CARTAO AMAZON: ... 31/03/2026 11:20. VALOR DE R$69,97, AMAZONMKTPLC*PURONUTRI.
+            match_amazon = re.search(r"CARTAO (AMAZON):.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$([\d\.,]+), (.*?)\.", bloco, re.IGNORECASE)
 
-                banco_final = MAPA_SMS.get(banco_raw, f"CARTÃO {banco_raw}")
-                valor_num = float(valor_str)
-                
-                # Lógica de Estorno
-                if status == "CANCELADA" or "ESTORNO" in bloco.upper():
-                    valor_num = -abs(valor_num)
-                
-                # Hash único para evitar duplicatas de importação
-                h_raw = f"{data_iso}{valor_num}{estabelecimento}{hora_min}{banco_final}{usuario_atual}"
-                h = hashlib.md5(h_raw.encode()).hexdigest()
-                
-                lista_transacoes.append({
-                    "data": data_iso,
-                    "data_obj": datetime.strptime(data_iso, '%Y-%m-%d').date(),
-                    "descricao": estabelecimento,
-                    "valor": valor_num,
-                    "banco": banco_final,
-                    "hash": h
-                })
+            if match_padrao:
+                banco_raw = match_padrao.group(1).upper()
+                status = match_padrao.group(2).upper()
+                estabelecimento = match_padrao.group(3).strip().upper()
+                valor_str = match_padrao.group(4).replace('.', '').replace(',', '.')
+                data_sms = match_padrao.group(5)
+                # Lógica de data abreviada (DD/MM)
+                ano_atual = datetime.now().year
+                data_iso = datetime.strptime(f"{data_sms}/{ano_atual}", "%d/%m/%Y").strftime('%Y-%m-%d')
+            
+            elif match_amazon:
+                banco_raw = match_amazon.group(1).upper()
+                data_full = match_amazon.group(2) # 31/03/2026
+                valor_str = match_amazon.group(3).replace('.', '').replace(',', '.')
+                estabelecimento = match_amazon.group(4).strip().upper()
+                status = "APROVADA"
+                # Converte data completa (DD/MM/AAAA)
+                data_iso = datetime.strptime(data_full, "%d/%m/%Y").strftime('%Y-%m-%d')
+
+            else:
+                continue # Pula se não bater com nenhum padrão
+
+            # --- PROCESSAMENTO COMUM (A partir daqui o código segue igual para ambos) ---
+            if match_meta:
+                hora_min = match_meta.group(2)
+            else:
+                hora_min = datetime.now().strftime("%H:%M")
+
+            banco_final = MAPA_SMS.get(banco_raw, f"CARTÃO {banco_raw}")
+            valor_num = float(valor_str)
+            
+            if status == "CANCELADA" or "ESTORNO" in bloco.upper():
+                valor_num = -abs(valor_num)
+            
+            h_raw = f"{data_iso}{valor_num}{estabelecimento}{hora_min}{banco_final}{usuario_atual}"
+            h = hashlib.md5(h_raw.encode()).hexdigest()
+            
+            lista_transacoes.append({
+                "data": data_iso,
+                "data_obj": datetime.strptime(data_iso, '%Y-%m-%d').date(),
+                "descricao": estabelecimento,
+                "valor": valor_num,
+                "banco": banco_final,
+                "hash": h
+            })
 
         if lista_transacoes:
             st.session_state.df_sms_preview = pd.DataFrame(lista_transacoes).sort_values("data", ascending=False)
