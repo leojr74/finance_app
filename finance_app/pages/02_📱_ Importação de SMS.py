@@ -19,12 +19,6 @@ st.set_page_config(
 usuario_atual = check_login()
 
 
-# 🔐 PROTEÇÃO DE PÁGINA
-if not st.session_state.get("logged_in"):
-    st.warning("Faça login para continuar")
-    st.stop()
-
-usuario_atual = st.session_state["user"]
 apply_global_style()
 
 st.title("📱 Importação de SMS")
