@@ -46,8 +46,7 @@ if not st.session_state.get("logged_in"):
                 st.session_state["user"] = user["email"]
                 st.session_state["user_name"] = user["name"]
 
-                # 🔥 salva token na URL
-                st.query_params["token"] = token
+               
 
                 st.success("Login realizado com sucesso!")
                 time.sleep(1)
@@ -91,7 +90,6 @@ usuario_atual = st.session_state["user"]
 # -------- LOGOUT --------
 if st.sidebar.button("🚪 Sair"):
     st.session_state.clear()
-    st.query_params.clear()
     st.rerun()
 
 
