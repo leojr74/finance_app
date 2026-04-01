@@ -25,18 +25,22 @@ criar_tabela()
 
 # --- AUTENTICAÇÃO CENTRALIZADA ---
 authenticator = get_authenticator()
-authenticator.login(location='unrendered')
+
+# 🔥 PRIMEIRO: renderiza / processa login
+authenticator.login(location='main')
+
+# 🔥 DEPOIS: verifica status
 auth_status = st.session_state.get("authentication_status")
 
-# ⏳ Ainda carregando (NÃO FAZ NADA)
+# ⏳ ainda carregando cookie → espera
 if auth_status is None:
     st.stop()
 
-# ❌ Só bloqueia se tiver CERTEZA que não está logado
+# ❌ não logado → mostra login (já está na tela)
 if auth_status is False:
-    st.warning("Sessão expirada. Faça login novamente.")
     st.stop()
 
+# ✅ logado
 usuario_atual = st.session_state["username"]
 
 # --- INTERFACE DE ACESSO (LOGIN / CADASTRO) ---
