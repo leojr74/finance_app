@@ -11,7 +11,7 @@ from utils.auth import check_login
 
 st.set_page_config(
     page_title="Importação de SMS",
-    page_icon="📥",
+    page_icon="📱",
     layout="wide"
 )
 
