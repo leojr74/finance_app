@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 import extra_streamlit_components as stx
-
+import datetime
 from ui import apply_global_style
 from database import (
     criar_tabela,
@@ -106,8 +106,14 @@ usuario_atual = usuario.email
 nome_usuario = usuario.name
 
 # -------- LOGOUT --------
+
+
 if st.sidebar.button("🚪 Sair"):
-    cookie_manager.set("session_token", "", expires_at=0)
+    cookie_manager.set(
+        "session_token",
+        "",
+        expires_at=datetime.datetime.now() - datetime.timedelta(days=1)
+    )
     st.rerun()
 
 # ---------------------------
