@@ -29,9 +29,13 @@ criar_tabela()
 cookie_manager = stx.CookieManager()
 
 # ---------------------------
-# 🔐 VERIFICA COOKIE (FONTE DA VERDADE)
+# 🔐 VERIFICA COOKIE
 # ---------------------------
 token = cookie_manager.get("session_token")
+
+if not token or token == "":
+    token = None
+
 usuario = None
 
 if token:
@@ -103,7 +107,7 @@ nome_usuario = usuario.name
 
 # -------- LOGOUT --------
 if st.sidebar.button("🚪 Sair"):
-    cookie_manager.delete("session_token")
+    cookie_manager.set("session_token", "", expires_at=0)
     st.rerun()
 
 # ---------------------------
@@ -156,21 +160,3 @@ with st.expander("⚙️ Configurações do Sistema", expanded=True):
         str(cat) for cat in set_todas
         if cat and str(cat).strip() not in termos_proibidos
     ])
-
-    fixas_atuais = get_gastos_fixos(usuario_atual)
-
-    if todas_as_categorias:
-        cols = st.columns(4)
-
-        for i, cat in enumerate(todas_as_categorias):
-            with cols[i % 4]:
-                checado = st.checkbox(cat, value=(cat in fixas_atuais))
-
-                if checado != (cat in fixas_atuais):
-                    salvar_config_categoria(cat, checado, usuario_atual)
-                    st.rerun()
-    else:
-        st.info("Nenhuma categoria encontrada.")
-
-st.write("---")
-st.caption("v4.0 | Sistema Financeiro (auth estável)")
