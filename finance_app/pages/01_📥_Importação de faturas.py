@@ -15,13 +15,22 @@ st.set_page_config(
     layout="wide"
 )
 
-# 🔐 VERIFICA LOGIN
+# 🔥 RESTAURA SESSÃO VIA URL (igual Home)
+if not st.session_state.get("logged_in"):
+    user_url = st.query_params.get("user")
+
+    if user_url:
+        st.session_state["logged_in"] = True
+        st.session_state["user"] = user_url
+        st.session_state["user_name"] = user_url  # fallback
+
+
+# 🔐 PROTEÇÃO DE PÁGINA
 if not st.session_state.get("logged_in"):
     st.warning("Faça login para continuar")
     st.stop()
 
 usuario_atual = st.session_state["user"]
-
 apply_global_style()
 
 from parser_router import extract_transactions_auto

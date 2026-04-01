@@ -13,8 +13,17 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 1. AUTENTICAÇÃO E SEGURANÇA ---
-# 🔐 VERIFICA LOGIN
+# 🔥 RESTAURA SESSÃO VIA URL (igual Home)
+if not st.session_state.get("logged_in"):
+    user_url = st.query_params.get("user")
+
+    if user_url:
+        st.session_state["logged_in"] = True
+        st.session_state["user"] = user_url
+        st.session_state["user_name"] = user_url  # fallback
+
+
+# 🔐 PROTEÇÃO DE PÁGINA
 if not st.session_state.get("logged_in"):
     st.warning("Faça login para continuar")
     st.stop()
