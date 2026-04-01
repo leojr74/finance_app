@@ -39,11 +39,13 @@ logado = st.session_state.get("logged_in", False)
 if not logado:
 
     st.title("💰 Sistema de Gestão Financeira")
-
     st.info("Faça login ou crie uma conta para continuar.")
 
-    # 🔥 CADASTRO VISÍVEL
     with st.expander("📝 Criar Conta"):
+
+        if "register_result" not in st.session_state:
+            st.session_state.register_result = None
+
         try:
             resultado = authenticator.register_user(
                 location='main',
@@ -51,26 +53,37 @@ if not logado:
                 captcha=False
             )
 
-            if resultado and resultado[0]:
-                email_novo, username_novo, nome_novo = resultado
+            # 🔥 GUARDA resultado no session_state
+            if resultado:
+                st.session_state.register_result = resultado
 
+        except Exception as e:
+            st.error(f"Erro no cadastro: {e}")
+
+        # 🔥 PROCESSA FORA DO FORM (CRÍTICO)
+        if st.session_state.register_result:
+            email_novo, username_novo, nome_novo = st.session_state.register_result
+
+            try:
                 model = authenticator.authentication_controller.authentication_model
                 senha_hash = model.credentials['usernames'][username_novo]['password']
 
                 from database import salvar_novo_usuario_db
 
-                salvar_novo_usuario_db(
+                sucesso = salvar_novo_usuario_db(
                     username=email_novo,
                     email=email_novo,
                     name=nome_novo,
                     password_hashed=senha_hash
                 )
 
-                st.success("Conta criada com sucesso!")
-                st.rerun()
+                if sucesso:
+                    st.success("✅ Conta criada com sucesso!")
+                    st.session_state.register_result = None
+                    st.rerun()
 
-        except Exception as e:
-            st.error(f"Erro ao cadastrar: {e}")
+            except Exception as e:
+                st.error(f"Erro ao salvar usuário: {e}")
 
     st.stop()
 
