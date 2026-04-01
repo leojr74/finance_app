@@ -9,8 +9,8 @@ from sqlalchemy import text
 from utils.auth import check_login
 
 st.set_page_config(
-    page_title="Importação de Faturas",
-    page_icon="📥",
+    page_title="Inclusão Manual",
+    page_icon="✍️",
     layout="wide"
 )
 
