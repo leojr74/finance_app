@@ -14,9 +14,9 @@ from database import (
     buscar_usuario_por_token
 )
 
-# 🔥 COOKIE MANAGER
-cookie_manager = stx.CookieManager()
-
+# ---------------------------
+# CONFIG
+# ---------------------------
 st.set_page_config(
     page_title="Finanças Pessoais",
     page_icon="💰",
@@ -26,26 +26,23 @@ st.set_page_config(
 apply_global_style()
 criar_tabela()
 
-# =========================
-# 🔥 RESTAURA LOGIN VIA COOKIE
-# =========================
-if not st.session_state.get("logged_in"):
+cookie_manager = stx.CookieManager()
 
-    token = cookie_manager.get("session_token")
+# ---------------------------
+# 🔐 VERIFICA COOKIE (FONTE DA VERDADE)
+# ---------------------------
+token = cookie_manager.get("session_token")
+usuario = None
 
-    if token:
-        user = buscar_usuario_por_token(token)
+if token:
+    user = buscar_usuario_por_token(token)
+    if user:
+        usuario = user
 
-        if user:
-            st.session_state["logged_in"] = True
-            st.session_state["user"] = user.email
-            st.session_state["user_name"] = user.name
-
-
-# =========================
+# ---------------------------
 # 🔐 LOGIN / CADASTRO
-# =========================
-if not st.session_state.get("logged_in"):
+# ---------------------------
+if not usuario:
 
     st.title("💰 Sistema de Gestão Financeira")
 
@@ -63,16 +60,7 @@ if not st.session_state.get("logged_in"):
             if user:
                 token = criar_session_token(user["email"])
 
-                # 🔥 salva no cookie (ESSENCIAL)
-                cookie_manager.set(
-                    "session_token",
-                    token,
-                    expires_at=None
-                )
-
-                st.session_state["logged_in"] = True
-                st.session_state["user"] = user["email"]
-                st.session_state["user_name"] = user["name"]
+                cookie_manager.set("session_token", token)
 
                 st.success("Login realizado com sucesso!")
                 time.sleep(1)
@@ -107,50 +95,47 @@ if not st.session_state.get("logged_in"):
 
     st.stop()
 
-
-# =========================
+# ---------------------------
 # 👤 USUÁRIO LOGADO
-# =========================
-usuario_atual = st.session_state["user"]
+# ---------------------------
+usuario_atual = usuario.email
+nome_usuario = usuario.name
 
 # -------- LOGOUT --------
 if st.sidebar.button("🚪 Sair"):
-    cookie_manager.delete("session_token")  # 🔥 limpa cookie
-    st.session_state.clear()
+    cookie_manager.delete("session_token")
     st.rerun()
 
-
-# =========================
-# 🏠 CONTEÚDO DA HOME
-# =========================
+# ---------------------------
+# 🏠 HOME
+# ---------------------------
 st.title("💰 Sistema de Gestão Financeira")
-st.markdown(f"### Bem-vindo, {st.session_state['user_name']}! 👋")
+st.markdown(f"### Bem-vindo, {nome_usuario}! 👋")
 st.write("---")
 
 st.markdown("### 🚀 Guia de Navegação")
 
-st.info("💡 **Dica Mobile:** Toque no menu ( **»** ) no canto superior esquerdo.")
+st.info("💡 Use o menu lateral para navegar entre as páginas.")
 
 st.info("""
-📥 Importação de faturas - Upload de PDFs com detecção automática.
+📥 Importação de faturas - Upload de PDFs.
 
-📱 Importação de SMS - Atualize transações via SMS.
+📱 Importação de SMS - Atualização automática.
 
-✍️ Inclusão Manual - Registre gastos fora do cartão.
+✍️ Inclusão Manual - Registre gastos.
 
 📑 Transações - Gerencie e categorize.
 
-📈 Dashboard - Analise seus gastos.
+📈 Dashboard - Visualize seus dados.
 
-📊 Orçamento - Controle metas mensais.
+📊 Orçamento - Controle financeiro.
 """)
 
 st.write("---")
 
-
-# =========================
+# ---------------------------
 # ⚙️ CONFIGURAÇÕES
-# =========================
+# ---------------------------
 with st.expander("⚙️ Configurações do Sistema", expanded=True):
 
     st.subheader("Definição de Gastos Fixos")
@@ -188,4 +173,4 @@ with st.expander("⚙️ Configurações do Sistema", expanded=True):
         st.info("Nenhuma categoria encontrada.")
 
 st.write("---")
-st.caption("v4.0 | Sistema Financeiro (auth estável 🚀)")
+st.caption("v4.0 | Sistema Financeiro (auth estável)")
