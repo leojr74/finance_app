@@ -8,6 +8,7 @@ from datetime import date
 from ui import apply_global_style
 from database import carregar_transacoes, get_engine
 from sqlalchemy import text
+from utils.auth import check_login
 
 st.set_page_config(
     page_title="Importação de Faturas",
@@ -15,7 +16,6 @@ st.set_page_config(
     layout="wide"
 )
 
-from utils.auth import check_login
 
 usuario_atual = check_login()
 

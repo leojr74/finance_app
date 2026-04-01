@@ -19,6 +19,31 @@ def get_engine():
     db_url = st.secrets["postgres"]["url"]
     return create_engine(db_url, pool_pre_ping=True)
 
+def criar_session_token(email):
+    engine = get_engine()
+    token = secrets.token_hex(16)
+
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE usuarios
+            SET session_token = :t
+            WHERE email = :e
+        """), {"t": token, "e": email})
+
+    return token
+
+
+def buscar_usuario_por_token(token):
+    engine = get_engine()
+
+    with engine.connect() as conn:
+        user = conn.execute(text("""
+            SELECT email, name
+            FROM usuarios
+            WHERE session_token = :t
+        """), {"t": token}).fetchone()
+
+    return user
 
 # =========================
 # USUÁRIOS / AUTH

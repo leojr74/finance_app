@@ -20,18 +20,6 @@ apply_global_style()
 criar_tabela()
 
 # =========================
-# 🔥 RESTAURA SESSÃO VIA URL (PERSISTÊNCIA)
-# =========================
-if not st.session_state.get("logged_in"):
-    user_url = st.query_params.get("user")
-
-    if user_url:
-        st.session_state["logged_in"] = True
-        st.session_state["user"] = user_url
-        st.session_state["user_name"] = user_url  # fallback
-
-
-# =========================
 # 🔐 LOGIN / CADASTRO
 # =========================
 if not st.session_state.get("logged_in"):
@@ -50,12 +38,16 @@ if not st.session_state.get("logged_in"):
             user = verificar_login(email, senha)
 
             if user:
+                from database import criar_session_token
+
+                token = criar_session_token(user["email"])
+
                 st.session_state["logged_in"] = True
                 st.session_state["user"] = user["email"]
                 st.session_state["user_name"] = user["name"]
 
-                # 🔥 salva na URL (persistência)
-                st.query_params["user"] = user["email"]
+                # 🔥 salva token na URL
+                st.query_params["token"] = token
 
                 st.success("Login realizado com sucesso!")
                 time.sleep(1)

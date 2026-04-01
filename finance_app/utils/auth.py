@@ -1,21 +1,20 @@
 def check_login():
     import streamlit as st
+    from database import buscar_usuario_por_token
 
-    if not st.session_state.get("logged_in"):
+    token = st.query_params.get("token")
 
-        user_url = st.query_params.get("user")
+    if isinstance(token, list):
+        token = token[0]
 
-        # 🔥 CORREÇÃO CRÍTICA
-        if user_url:
-            if isinstance(user_url, list):
-                user_url = user_url[0]
+    if token:
+        user = buscar_usuario_por_token(token)
 
+        if user:
             st.session_state["logged_in"] = True
-            st.session_state["user"] = user_url
-            st.session_state["user_name"] = user_url
+            st.session_state["user"] = user.email
+            st.session_state["user_name"] = user.name
+            return user.email
 
-    if not st.session_state.get("logged_in"):
-        st.warning("Faça login para continuar")
-        st.stop()
-
-    return st.session_state["user"]
+    st.warning("Faça login para continuar")
+    st.stop()
