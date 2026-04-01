@@ -26,11 +26,13 @@ def _carregar_credentials_cache():
 def get_authenticator():
     """
     Retorna o objeto Authenticate reutilizando-o entre reruns via session_state.
-    O Authenticate instancia um CookieManager (widget) e por isso não pode
-    ficar em @st.cache_resource. Cacheamos só as credenciais e guardamos
-    o objeto no session_state para que o mesmo JWT seja validado no F5.
+    O Authenticate instancia um CookieManager (extra-streamlit-components) que
+    dispara um rerun automático para buscar o cookie do browser. Por isso
+    marcamos 'cookie_rerun_done' para saber se já passamos pelo rerun e o
+    cookie teve chance de ser lido.
     """
-    if "authenticator" not in st.session_state:
+    is_new_authenticator = "authenticator" not in st.session_state
+    if is_new_authenticator:
         credentials = _carregar_credentials_cache()
         cookie_key  = st.secrets["auth"]["cookie_key"]
         st.session_state["authenticator"] = stauth.Authenticate(
@@ -40,7 +42,22 @@ def get_authenticator():
             cookie_expiry_days=30,
             validator=None
         )
+        # Na primeira instanciação o CookieManager vai disparar um rerun.
+        # Marcamos que ainda não passamos pelo rerun do cookie.
+        st.session_state["_cookie_rerun_done"] = False
+    else:
+        # Já existia o authenticator — se o rerun do cookie estava pendente,
+        # agora ele já ocorreu.
+        if not st.session_state.get("_cookie_rerun_done", True):
+            st.session_state["_cookie_rerun_done"] = True
     return st.session_state["authenticator"]
+
+def cookie_rerun_pendente():
+    """
+    Retorna True se o CookieManager ainda não completou seu rerun automático.
+    Use nas subpages para não bloquear a sessão antes do cookie ser lido.
+    """
+    return not st.session_state.get("_cookie_rerun_done", True)
 
 def invalidar_cache_authenticator():
     """Chame após cadastrar novo usuário para forçar recarga das credenciais."""

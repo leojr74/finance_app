@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date
 from categorizer import find_category
 from ui import apply_global_style
-from database import get_authenticator, carregar_regras_db, salvar_regra_db, get_engine
+from database import get_authenticator, cookie_rerun_pendente, carregar_regras_db, salvar_regra_db, get_engine
 from sqlalchemy import text
 
 st.set_page_config(
@@ -16,6 +16,8 @@ authenticator = get_authenticator()
 authenticator.login(location='unrendered')
 
 if not st.session_state.get("authentication_status"):
+    if cookie_rerun_pendente():
+        st.stop()  # CookieManager ainda não concluiu o rerun — aguarda silenciosamente
     st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 

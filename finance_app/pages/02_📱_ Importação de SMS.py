@@ -4,7 +4,7 @@ import hashlib
 import re
 from datetime import datetime
 from ui import apply_global_style
-from database import get_engine, get_authenticator, carregar_transacoes, verificar_duplicata
+from database import get_engine, get_authenticator, cookie_rerun_pendente, carregar_transacoes, verificar_duplicata
 from sqlalchemy import text
 
 st.set_page_config(
@@ -20,6 +20,8 @@ authenticator = get_authenticator()
 authenticator.login(location='unrendered')
 
 if not st.session_state.get("authentication_status"):
+    if cookie_rerun_pendente():
+        st.stop()  # CookieManager ainda não concluiu o rerun — aguarda silenciosamente
     st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 

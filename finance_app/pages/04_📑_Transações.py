@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import date, timedelta
-from database import carregar_transacoes, get_authenticator, get_engine, save_all_changes, deletar_transacoes, carregar_regras_db, salvar_regra_db
+from database import carregar_transacoes, get_authenticator, cookie_rerun_pendente, get_engine, save_all_changes, deletar_transacoes, carregar_regras_db, salvar_regra_db
 from categorizer import clean_description, find_category
 from ui import apply_global_style
 from sqlalchemy import text
@@ -18,6 +18,8 @@ authenticator = get_authenticator()
 authenticator.login(location='unrendered')
 
 if not st.session_state.get("authentication_status"):
+    if cookie_rerun_pendente():
+        st.stop()  # CookieManager ainda não concluiu o rerun — aguarda silenciosamente
     st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 

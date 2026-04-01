@@ -4,7 +4,7 @@ import altair as alt
 import datetime
 from fpdf import FPDF
 import io
-from database import carregar_transacoes, get_authenticator, get_gastos_fixos, carregar_regras_db
+from database import carregar_transacoes, get_authenticator, cookie_rerun_pendente, get_gastos_fixos, carregar_regras_db
 from ui import apply_global_style
 
 st.set_page_config(
@@ -17,6 +17,8 @@ authenticator = get_authenticator()
 authenticator.login(location='unrendered')
 
 if not st.session_state.get("authentication_status"):
+    if cookie_rerun_pendente():
+        st.stop()  # CookieManager ainda não concluiu o rerun — aguarda silenciosamente
     st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 

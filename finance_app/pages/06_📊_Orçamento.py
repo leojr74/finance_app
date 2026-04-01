@@ -6,6 +6,7 @@ from database import (
     carregar_transacoes,
     criar_tabela,
     get_authenticator,
+    cookie_rerun_pendente,
     salvar_orcamento,
     get_gastos_fixos,
     carregar_orcamentos,
@@ -25,6 +26,8 @@ authenticator = get_authenticator()
 authenticator.login(location='unrendered')
 
 if not st.session_state.get("authentication_status"):
+    if cookie_rerun_pendente():
+        st.stop()  # CookieManager ainda não concluiu o rerun — aguarda silenciosamente
     st.warning("Sessão expirada. Por favor, faça login na Home.")
     st.stop()
 
