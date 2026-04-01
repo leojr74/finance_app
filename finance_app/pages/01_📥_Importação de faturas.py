@@ -6,7 +6,7 @@ import tempfile
 import calendar
 from datetime import date
 from ui import apply_global_style
-from database import get_authenticator, cookie_rerun_pendente, carregar_transacoes, get_engine
+from database import get_authenticator, cookie_rerun_pendente, carregar_transacoes, get_engine, cookie_rerun_pendente
 from sqlalchemy import text
 
 st.set_page_config(

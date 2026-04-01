@@ -9,7 +9,8 @@ from database import (
     get_gastos_fixos, 
     salvar_config_categoria,
     get_authenticator,
-    invalidar_cache_authenticator
+    invalidar_cache_authenticator,
+    cookie_rerun_pendente
 )
 
 
