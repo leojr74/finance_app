@@ -42,8 +42,6 @@ def cookie_rerun_pendente():
     return not st.session_state.get("_cookie_rerun_done", True)
 
 def invalidar_cache_authenticator():
-    """Chame após cadastrar novo usuário para forçar recarga das credenciais."""
-    _carregar_credentials_cache.clear()
     st.session_state.pop("authenticator", None)
 
 def criar_tabela():
@@ -113,7 +111,9 @@ def salvar_novo_usuario_db(username, email, name, password_hashed):
             conn.execute(query, {"u": username, "e": email, "n": name, "p": password_hashed})
             return True
     except Exception as e:
-        st.error(f"Erro ao salvar usuário: {e}")
+        import traceback
+        st.error("Erro ao salvar usuário:")
+        st.code(traceback.format_exc())
         return False
 
 # --- SEÇÃO DE TRANSAÇÕES ---

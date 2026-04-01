@@ -1,3 +1,5 @@
+import time
+
 import streamlit as st
 import streamlit_authenticator as stauth
 from ui import apply_global_style
@@ -25,8 +27,7 @@ criar_tabela()
 
 authenticator = get_authenticator()
 
-# --- LOGIN ---
-authenticator.login(location='main')
+
 
 # --- CONTROLE DE SESSÃO ---
 if st.session_state.get("authentication_status"):
@@ -36,56 +37,74 @@ if st.session_state.get("authentication_status"):
 logado = st.session_state.get("logged_in", False)
 
 # --- SE NÃO ESTIVER LOGADO ---
-if not logado:
+tab_login, tab_signup = st.tabs(["🔐 Entrar", "📝 Criar Conta"])
 
-    st.title("💰 Sistema de Gestão Financeira")
-    st.info("Faça login ou crie uma conta para continuar.")
+with tab_login:
+    authenticator.login(location='main')
 
-    with st.expander("📝 Criar Conta"):
+with tab_signup:
+    try:
+        resultado = authenticator.register_user(
+            location='main',
+            pre_authorized=None, 
+            captcha=False,
+            fields={
+                'Form name': 'Criar Conta',
+                'First name': 'Nome',
+                'Last name': 'Sobrenome',
+                'Email': 'Email',
+                'Username': 'Usuário',
+                'Password': 'Senha',
+                'Repeat password': 'Repetir Senha',
+                'Register': 'Cadastrar'
+            }
+        )
 
-        if "register_result" not in st.session_state:
-            st.session_state.register_result = None
+        # ✅ SÓ EXECUTA SE VEIO DO BOTÃO
+        if resultado and resultado[0]:
 
-        try:
-            resultado = authenticator.register_user(
-                location='main',
-                pre_authorized=None,
-                captcha=False
-            )
+            email_novo, username_novo, nome_novo = resultado
 
-            # 🔥 GUARDA resultado no session_state
-            if resultado:
-                st.session_state.register_result = resultado
-
-        except Exception as e:
-            st.error(f"Erro no cadastro: {e}")
-
-        # 🔥 PROCESSA FORA DO FORM (CRÍTICO)
-        if st.session_state.register_result:
-            email_novo, username_novo, nome_novo = st.session_state.register_result
+            user_data = None
 
             try:
                 model = authenticator.authentication_controller.authentication_model
-                senha_hash = model.credentials['usernames'][username_novo]['password']
 
-                from database import salvar_novo_usuario_db
+                for attr in ['user_dict', 'credentials', 'config']:
+                    target = getattr(model, attr, {})
+                    if isinstance(target, dict) and 'usernames' in target:
+                        user_data = target['usernames'].get(username_novo)
+                        if user_data:
+                            break
+            except Exception:
+                pass
 
-                sucesso = salvar_novo_usuario_db(
+            # ✅ SÓ SALVA SE TIVER HASH
+            if user_data and 'password' in user_data:
+
+                sucesso_db = salvar_novo_usuario_db(
                     username=email_novo,
                     email=email_novo,
                     name=nome_novo,
-                    password_hashed=senha_hash
+                    password_hashed=user_data['password']
                 )
 
-                if sucesso:
-                    st.success("✅ Conta criada com sucesso!")
-                    st.session_state.register_result = None
+                if sucesso_db:
+                    invalidar_cache_authenticator()
+                    st.success(f'✅ Conta criada com sucesso! Faça login para continuar.')
+                    st.balloons()
+
+                    time.sleep(1.5)  # ⏳ espera 1.5 segundos
+
                     st.rerun()
 
-            except Exception as e:
-                st.error(f"Erro ao salvar usuário: {e}")
+            else:
+                st.error("Erro ao localizar hash da senha.")
 
-    st.stop()
+    except Exception as e:
+        if "NoneType" not in str(e):
+            st.error(f"Erro no processo de cadastro: {e}")
+
 
 # --- SE ESTIVER LOGADO ---
 usuario_atual = st.session_state.get("user")
