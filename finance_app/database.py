@@ -3,6 +3,7 @@ import bcrypt
 import streamlit as st
 from sqlalchemy import create_engine, text
 import warnings
+import secrets  
 
 warnings.filterwarnings("ignore", category=UserWarning, module='pandas')
 
