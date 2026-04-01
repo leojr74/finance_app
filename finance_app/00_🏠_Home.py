@@ -32,23 +32,20 @@ cookie_manager = stx.CookieManager()
 # 🔐 VERIFICA SESSÃO
 # ---------------------------
 
-# Prioriza session_state (imediato), usa cookie só como fallback (reload/nova aba)
-token = st.session_state.get("session_token")
-
-if not token:
-    token = cookie_manager.get("session_token")
-    if token:
-        st.session_state["session_token"] = token  # sincroniza
-
-if not token or token == "":
+# Se acabou de fazer logout, não reler o cookie
+if st.session_state.get("logged_out"):
+    st.session_state.pop("logged_out", None)
     token = None
+else:
+    token = st.session_state.get("session_token")
 
-usuario = None
+    if not token:
+        token = cookie_manager.get("session_token")
+        if token:
+            st.session_state["session_token"] = token
 
-if token:
-    user = buscar_usuario_por_token(token)
-    if user:
-        usuario = user
+    if not token or token == "":
+        token = None
 
 # ---------------------------
 # 🔐 LOGIN / CADASTRO
@@ -113,10 +110,10 @@ if not usuario:
 usuario_atual = usuario.email
 nome_usuario = usuario.name
 
-# -------- LOGOUT --------
 if st.sidebar.button("🚪 Sair"):
-    st.session_state.pop("session_token", None)  # imediato — garante o logout
-    cookie_manager.delete("session_token")        # remove o cookie (pode demorar, mas não importa)
+    st.session_state.clear()              # limpa tudo
+    st.session_state["logged_out"] = True # flag para não reler o cookie
+    cookie_manager.delete("session_token")
     st.rerun()
 
 # ---------------------------
