@@ -20,10 +20,15 @@ st.set_page_config(
 authenticator = get_authenticator()
 authenticator.login(location='unrendered')
 
-if not st.session_state.get("authentication_status"):
-    if cookie_rerun_pendente():
-        st.stop()  # CookieManager ainda não concluiu o rerun — aguarda silenciosamente
-    st.warning("Sessão expirada. Por favor, faça login na Home.")
+auth_status = st.session_state.get("authentication_status", None)
+
+# ⏳ AINDA CARREGANDO (não decide nada ainda)
+if auth_status is None:
+    st.stop()
+
+# ❌ NÃO AUTENTICADO
+if auth_status is False:
+    st.warning("Sessão expirada. Faça login novamente.")
     st.stop()
 
 usuario_atual = st.session_state["username"]

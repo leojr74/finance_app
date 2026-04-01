@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, text
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module='pandas')
-print(len(st.secrets["auth"]["cookie_key"]))
+
 @st.cache_resource
 def get_engine():
     """Retorna o engine do SQLAlchemy com pool de conexões configurado."""
@@ -16,24 +16,23 @@ def get_engine():
     # pool_pre_ping=True ajuda a evitar erros de conexão ociosa (comum no Streamlit/Supabase)
     return create_engine(db_url, pool_pre_ping=True)
 
-@st.cache_data(ttl=300)
 def _carregar_credentials_cache():
     """Cacheia apenas dados puros de credenciais (sem widgets). TTL=5min."""
     return carregar_usuarios_db()
 
 def get_authenticator():
-    # Remova temporariamente o _carregar_credentials_cache() e use direto:
-    credentials = _carregar_credentials_cache() 
-    cookie_key = st.secrets["auth"]["cookie_key"]
+    if "authenticator" not in st.session_state:
+        credentials = carregar_usuarios_db()
+        cookie_key = st.secrets["auth"]["cookie_key"]
 
-    authenticator = stauth.Authenticate(
-        credentials,
-        "financas_v1000", # Nome novo
-        cookie_key,
-        30
-    )
-    st.session_state["authenticator"] = authenticator
-    return authenticator
+        st.session_state["authenticator"] = stauth.Authenticate(
+            credentials,
+            "financas_v1000",
+            cookie_key,
+            30
+        )
+
+    return st.session_state["authenticator"]
 
 def cookie_rerun_pendente():
     """
