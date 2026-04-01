@@ -6,31 +6,19 @@ from ui import apply_global_style
 from database import carregar_regras_db, get_engine
 from sqlalchemy import text
 
+from utils.auth import check_login
+
 st.set_page_config(
-    page_title="Inclusão Manual de Transações",
-    page_icon="✍️",
+    page_title="Importação de Faturas",
+    page_icon="📥",
     layout="wide"
 )
 
-# 🔥 RESTAURA SESSÃO VIA URL (igual Home)
-if not st.session_state.get("logged_in"):
-    user_url = st.query_params.get("user")
 
-    if user_url:
-        st.session_state["logged_in"] = True
-        st.session_state["user"] = user_url
-        st.session_state["user_name"] = user_url  # fallback
+usuario_atual = check_login()
 
-
-# 🔐 PROTEÇÃO DE PÁGINA
-if not st.session_state.get("logged_in"):
-    st.warning("Faça login para continuar")
-    st.stop()
-
-usuario_atual = st.session_state["user"]
 
 apply_global_style()
-
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.title("✍️ Inclusão Manual de Transações")
