@@ -28,7 +28,7 @@ authenticator = get_authenticator()
 
 # CRÍTICO: login() deve ser chamado SEMPRE, antes de checar session_state.
 # É ele que lê o cookie JWT e restaura authentication_status no F5/rerun.
-if not st.session_state.get("authentication_status"):
+if st.session_state.get("authentication_status") is None:
     authenticator.login(location='unrendered')
     # O CookieManager dispara um rerun automático na primeira execução.
     # Se ainda estamos nesse rerun inicial, aguardamos silenciosamente.
@@ -36,7 +36,7 @@ if not st.session_state.get("authentication_status"):
         st.stop()
 
 # --- INTERFACE DE ACESSO (LOGIN / CADASTRO) ---
-if not st.session_state.get("authentication_status"):
+if st.session_state.get("authentication_status") is None:
     _, col_central, _ = st.columns([1, 2, 1])
     
     with col_central:

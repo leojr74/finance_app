@@ -1,13 +1,11 @@
 import pandas as pd
 import streamlit as st
-import yaml
-import os
 import streamlit_authenticator as stauth
 from sqlalchemy import create_engine, text
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning, module='pandas')
-
+print(len(st.secrets["auth"]["cookie_key"]))
 @st.cache_resource
 def get_engine():
     """Retorna o engine do SQLAlchemy com pool de conexões configurado."""
@@ -24,33 +22,18 @@ def _carregar_credentials_cache():
     return carregar_usuarios_db()
 
 def get_authenticator():
-    """
-    Retorna o objeto Authenticate reutilizando-o entre reruns via session_state.
-    O Authenticate instancia um CookieManager (extra-streamlit-components) que
-    dispara um rerun automático para buscar o cookie do browser. Por isso
-    marcamos 'cookie_rerun_done' para saber se já passamos pelo rerun e o
-    cookie teve chance de ser lido.
-    """
-    is_new_authenticator = "authenticator" not in st.session_state
-    if is_new_authenticator:
-        credentials = _carregar_credentials_cache()
-        cookie_key  = st.secrets["auth"]["cookie_key"]
-        st.session_state["authenticator"] = stauth.Authenticate(
-            credentials=credentials,
-            cookie_name="finance_app_cookie",
-            cookie_key=cookie_key,
-            cookie_expiry_days=30,
-            validator=None
-        )
-        # Na primeira instanciação o CookieManager vai disparar um rerun.
-        # Marcamos que ainda não passamos pelo rerun do cookie.
-        st.session_state["_cookie_rerun_done"] = False
-    else:
-        # Já existia o authenticator — se o rerun do cookie estava pendente,
-        # agora ele já ocorreu.
-        if not st.session_state.get("_cookie_rerun_done", True):
-            st.session_state["_cookie_rerun_done"] = True
-    return st.session_state["authenticator"]
+    # Remova temporariamente o _carregar_credentials_cache() e use direto:
+    credentials = _carregar_credentials_cache() 
+    cookie_key = st.secrets["auth"]["cookie_key"]
+
+    authenticator = stauth.Authenticate(
+        credentials,
+        "financas_v1000", # Nome novo
+        cookie_key,
+        30
+    )
+    st.session_state["authenticator"] = authenticator
+    return authenticator
 
 def cookie_rerun_pendente():
     """
@@ -158,33 +141,63 @@ def salvar_transacoes(lista_dados, user_id):
         st.error(f"Erro no bulk insert: {e}")
         return 0
 
-def save_all_changes(df, user_id):
-    """Sincroniza edições do DataFrame usando o engine."""
+def save_all_changes(df_novo, user_id):
+    """Atualiza apenas o que mudou comparando com o banco (100% confiável)."""
+
+    import pandas as pd
+    from sqlalchemy import text
+
     engine = get_engine()
+
+    # 🔥 BUSCA O ESTADO REAL DO BANCO
+    query_load = text("""
+        SELECT id, data, descricao, valor, categoria
+        FROM transacoes
+        WHERE user_id = :u
+    """)
+
+    df_original = pd.read_sql_query(query_load, engine, params={"u": user_id})
+    df_original = df_original.set_index("id")
+
+    df_novo = df_novo.set_index("id")
+
+    updates = []
+
+    for idx in df_novo.index:
+        if idx not in df_original.index:
+            continue
+
+        row_new = df_novo.loc[idx]
+        row_old = df_original.loc[idx]
+
+        if (
+            str(row_new["categoria"]) != str(row_old["categoria"]) or
+            float(row_new["valor"]) != float(row_old["valor"]) or
+            pd.to_datetime(row_new["data"]) != pd.to_datetime(row_old["data"]) or
+            str(row_new["descricao"]) != str(row_old["descricao"])
+        ):
+            updates.append({
+                "cat": str(row_new["categoria"]),
+                "val": float(row_new["valor"]),
+                "dat": pd.to_datetime(row_new["data"]).date(),
+                "desc": str(row_new["descricao"]),
+                "id": int(idx),
+                "u": user_id
+            })
+
+    if not updates:
+        return 0
+
     query = text("""
         UPDATE transacoes 
         SET categoria = :cat, valor = :val, data = :dat, descricao = :desc
         WHERE id = :id AND user_id = :u
     """)
-    
-    updates = []
-    for _, row in df.iterrows():
-        updates.append({
-            "cat": str(row['categoria']),
-            "val": float(row['valor']),
-            "dat": pd.to_datetime(row['data']).date(),
-            "desc": str(row['descricao']),
-            "id": int(row['id']),
-            "u": user_id
-        })
 
-    try:
-        with engine.begin() as conn:
-            conn.execute(query, updates)
-        return len(updates)
-    except Exception as e:
-        st.error(f"Erro ao atualizar transações: {e}")
-        return 0
+    with engine.begin() as conn:
+        conn.execute(query, updates)
+
+    return len(updates)
 
 def deletar_transacoes(ids, user_id):
     engine = get_engine()

@@ -55,6 +55,7 @@ if "df_transacoes" not in st.session_state:
         if df is not None and not df.empty:
             # Passamos as regras para a função de inteligência
             st.session_state.df_transacoes = aplicar_inteligencia_db(df, regras_usuario)
+            st.session_state.df_transacoes_original = st.session_state.df_transacoes.copy()
             # Garantimos que o índice seja o ID para as ações em massa
             if st.session_state.df_transacoes.index.name != 'id':
                 st.session_state.df_transacoes.set_index("id", inplace=True)

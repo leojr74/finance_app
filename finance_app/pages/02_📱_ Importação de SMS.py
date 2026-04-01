@@ -4,8 +4,9 @@ import hashlib
 import re
 from datetime import datetime
 from ui import apply_global_style
-from database import get_engine, get_authenticator, cookie_rerun_pendente, carregar_transacoes, verificar_duplicata
+from database import get_engine, get_authenticator, cookie_rerun_pendente, carregar_transacoes, carregar_regras_db
 from sqlalchemy import text
+from categorizer import find_category
 
 st.set_page_config(
     page_title="Importação de SMS",
@@ -163,78 +164,81 @@ if st.session_state.df_sms_preview is not None:
         }
     )
 if st.button("💾 Salvar no Banco de Dados", use_container_width=True):
-        try:
-            engine = get_engine()
+    regras_usuario = carregar_regras_db(usuario_atual)
+    try:
+        engine = get_engine()
+        
+        # 1. Carrega dados para comparação
+        df_db = carregar_transacoes(usuario_atual)
+        
+        novos_para_inserir = []
+        count_manual = 0
+        count_hash = 0
+
+        # Preparação de sets para comparação rápida
+        if not df_db.empty:
+            # Criamos uma chave única (Data, Valor, Banco) para detectar duplicatas manuais
+            db_keys = set(
+                (pd.to_datetime(r['data']).date(), round(float(r['valor']), 2), str(r['banco']).upper()) 
+                for _, r in df_db.iterrows()
+            )
+            hashes_existentes = set(df_db['hash_fatura'].dropna().unique())
+        else:
+            db_keys = set()
+            hashes_existentes = set()
+
+        # 2. Loop de Validação
+        for _, row in df_sms.iterrows():
+            # Validação 1: Já importado via Hash?
+            if row['hash'] in hashes_existentes:
+                count_hash += 1
+                continue
             
-            # 1. Carrega dados para comparação
-            df_db = carregar_transacoes(usuario_atual)
+            # Validação 2: Similaridade (Manual/SMS)
+            chave_atual = (row['data_obj'], round(float(row['valor']), 2), str(row['banco']).upper())
+            if chave_atual in db_keys:
+                count_manual += 1
+                continue 
+
+            # Adiciona à lista como DICIONÁRIO para o SQLAlchemy
+            categoria_auto = find_category(row['descricao'], regras_usuario)
+
+            novos_para_inserir.append({
+                "dat": row['data'], 
+                "des": row['descricao'], 
+                "cat": categoria_auto, 
+                "val": row['valor'], 
+                "bnc": row['banco'], 
+                "uid": usuario_atual, 
+                "hsh": row['hash']
+            })
+
+        # 3. Execução Final com SQLAlchemy
+        if novos_para_inserir:
+            query = text('''
+                INSERT INTO transacoes (data, descricao, categoria, valor, banco, user_id, hash_fatura) 
+                VALUES (:dat, :des, :cat, :val, :bnc, :uid, :hsh)
+            ''')
             
-            novos_para_inserir = []
-            count_manual = 0
-            count_hash = 0
+            with engine.begin() as conn_trans:
+                conn_trans.execute(query, novos_para_inserir)
+            
+            st.success(f"✅ {len(novos_para_inserir)} novas transações salvas!")
+            
+            # --- LIMPEZA AUTOMÁTICA ---
+            st.session_state.df_sms_preview = None
+            st.session_state.input_counter += 1
+            
+            if 'df_transacoes' in st.session_state:
+                del st.session_state.df_transacoes
+            
+            st.rerun()
+        else:
+            st.warning("Todas as transações já existem no banco.")
 
-            # Preparação de sets para comparação rápida
-            if not df_db.empty:
-                # Criamos uma chave única (Data, Valor, Banco) para detectar duplicatas manuais
-                db_keys = set(
-                    (pd.to_datetime(r['data']).date(), round(float(r['valor']), 2), str(r['banco']).upper()) 
-                    for _, r in df_db.iterrows()
-                )
-                hashes_existentes = set(df_db['hash_fatura'].dropna().unique())
-            else:
-                db_keys = set()
-                hashes_existentes = set()
+        # Feedbacks informativos
+        if count_manual > 0: st.info(f"📌 {count_manual} já existiam (lançamento manual).")
+        if count_hash > 0: st.warning(f"🚫 {count_hash} já foram importadas via SMS.")
 
-            # 2. Loop de Validação
-            for _, row in df_sms.iterrows():
-                # Validação 1: Já importado via Hash?
-                if row['hash'] in hashes_existentes:
-                    count_hash += 1
-                    continue
-                
-                # Validação 2: Similaridade (Manual/SMS)
-                chave_atual = (row['data_obj'], round(float(row['valor']), 2), str(row['banco']).upper())
-                if chave_atual in db_keys:
-                    count_manual += 1
-                    continue 
-
-                # Adiciona à lista como DICIONÁRIO para o SQLAlchemy
-                novos_para_inserir.append({
-                    "dat": row['data'], 
-                    "des": row['descricao'], 
-                    "cat": "Sem categoria", 
-                    "val": row['valor'], 
-                    "bnc": row['banco'], 
-                    "uid": usuario_atual, 
-                    "hsh": row['hash']
-                })
-
-            # 3. Execução Final com SQLAlchemy
-            if novos_para_inserir:
-                query = text('''
-                    INSERT INTO transacoes (data, descricao, categoria, valor, banco, user_id, hash_fatura) 
-                    VALUES (:dat, :des, :cat, :val, :bnc, :uid, :hsh)
-                ''')
-                
-                with engine.begin() as conn_trans:
-                    conn_trans.execute(query, novos_para_inserir)
-                
-                st.success(f"✅ {len(novos_para_inserir)} novas transações salvas!")
-                
-                # --- LIMPEZA AUTOMÁTICA ---
-                st.session_state.df_sms_preview = None
-                st.session_state.input_counter += 1
-                
-                if 'df_transacoes' in st.session_state:
-                    del st.session_state.df_transacoes
-                
-                st.rerun()
-            else:
-                st.warning("Todas as transações já existem no banco.")
-
-            # Feedbacks informativos
-            if count_manual > 0: st.info(f"📌 {count_manual} já existiam (lançamento manual).")
-            if count_hash > 0: st.warning(f"🚫 {count_hash} já foram importadas via SMS.")
-
-        except Exception as e:
-            st.error(f"Erro ao salvar no banco: {e}")
+    except Exception as e:
+        st.error(f"Erro ao salvar no banco: {e}")

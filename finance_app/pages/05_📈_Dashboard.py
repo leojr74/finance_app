@@ -121,11 +121,33 @@ with c1:
         max_value=limite_max
     )
 
-if isinstance(periodo, tuple) and len(periodo) == 2:
-    df_filtrado = df[(df["data"].dt.date >= periodo[0]) & (df["data"].dt.date <= periodo[1])].copy()
-    txt_periodo_pdf = f"{periodo[0].strftime('%d/%m/%Y')} ate {periodo[1].strftime('%d/%m/%Y')}"
+if isinstance(periodo, tuple):
+    if len(periodo) == 2 and periodo[0] and periodo[1]:
+        # Intervalo completo
+        data_inicio, data_fim = periodo
+
+        df_filtrado = df[
+            (df["data"].dt.date >= data_inicio) &
+            (df["data"].dt.date <= data_fim)
+        ].copy()
+
+        txt_periodo_pdf = f"{data_inicio.strftime('%d/%m/%Y')} ate {data_fim.strftime('%d/%m/%Y')}"
+
+    elif len(periodo) == 1 or (len(periodo) == 2 and periodo[0] and not periodo[1]):
+        # Só data inicial selecionada (ou no meio da seleção)
+        data_sel = periodo[0]
+
+        df_filtrado = df[df["data"].dt.date == data_sel].copy()
+
+        txt_periodo_pdf = data_sel.strftime('%d/%m/%Y')
+
+    else:
+        st.stop()
+
 else:
-    data_sel = periodo[0] if isinstance(periodo, list) else periodo
+    # Caso venha como data única (segurança extra)
+    data_sel = periodo
+
     df_filtrado = df[df["data"].dt.date == data_sel].copy()
     txt_periodo_pdf = data_sel.strftime('%d/%m/%Y')
 
@@ -144,58 +166,58 @@ m3.metric("Custos Variáveis", formatar(var))
 
 # 7. GRÁFICOS
 st.write("---")
-col_esq, col_dir = st.columns(2)
+
+# Agrupamento e Seleção permanecem iguais
 df_agrupado = df_filtrado.groupby("categoria")["valor"].sum().reset_index()
 selecao = alt.selection_point(fields=["categoria"], name="sel")
 
-with col_esq:
-    st.subheader("🍕 Distribuição por Categoria")
-    pizza = alt.Chart(df_agrupado).mark_arc(innerRadius=50).encode(
-        theta=alt.Theta(field="valor", type="quantitative"),
-        color=alt.Color(field="categoria", type="nominal", scale=alt.Scale(scheme='tableau10')),
-        opacity=alt.condition(selecao, alt.value(1.0), alt.value(0.4)),
-        tooltip=[alt.Tooltip("categoria"), alt.Tooltip("valor", format=",.2f")]
-    ).add_params(selecao).properties(height=400)
-    evento_pizza = st.altair_chart(pizza, width = 'stretch', on_select="rerun")
+# Removemos st.columns e o bloco 'with col_dir'
+st.subheader("🍕 Distribuição por Categoria")
 
-with col_dir:
-    st.subheader("📊 Maiores Gastos")
-    df_barras = df_agrupado.sort_values("valor", ascending=False)
-    barras = alt.Chart(df_barras).mark_bar().encode(
-        x=alt.X("valor:Q", title="Total (R$)"),
-        y=alt.Y("categoria:N", sort="-x", title=None),
-        color=alt.Color("categoria:N", legend=None, scale=alt.Scale(scheme='tableau10')),
-        opacity=alt.condition(selecao, alt.value(1.0), alt.value(0.4)),
-        tooltip=[alt.Tooltip("categoria"), alt.Tooltip("valor", format=",.2f")]
-    ).add_params(selecao).properties(height=400)
-    evento_barras = st.altair_chart(barras, width = 'stretch', on_select="rerun")
+pizza = alt.Chart(df_agrupado).mark_arc(innerRadius=50).encode(
+    theta=alt.Theta(field="valor", type="quantitative"),
+    color=alt.Color(field="categoria", type="nominal", scale=alt.Scale(scheme='tableau10')),
+    opacity=alt.condition(selecao, alt.value(1.0), alt.value(0.4)),
+    tooltip=[alt.Tooltip("categoria"), alt.Tooltip("valor", format=",.2f")]
+).add_params(selecao).properties(height=500) # Aumentei um pouco a altura para preencher melhor a tela
 
+# Exibe o gráfico ocupando a largura disponível
+evento_pizza = st.altair_chart(pizza, width='stretch', on_select="rerun")
 # --- TABELA DE DETALHES ---
 categoria_selecionada = None
+
+# Verificamos apenas a seleção do gráfico de pizza
 sel_pizza = evento_pizza.get("selection", {}).get("sel", [])
-sel_barras = evento_barras.get("selection", {}).get("sel", [])
 
 if sel_pizza and len(sel_pizza) > 0:
-    categoria_selecionada = sel_pizza[0].get("categoria")
-elif sel_barras and len(sel_barras) > 0:
-    categoria_selecionada = sel_barras[0].get("categoria")
+    # Ajuste conforme o retorno do Altair (algumas versões retornam o valor direto, outras um dicionário)
+    # Se 'sel_pizza[0]' for um dicionário:
+    if isinstance(sel_pizza[0], dict):
+        categoria_selecionada = sel_pizza[0].get("categoria")
+    # Caso seja o valor direto (comum em seleções de campo único):
+    else:
+        categoria_selecionada = sel_pizza[0]
 
 if categoria_selecionada:
     st.write("---")
     st.subheader(f"📋 Transações — {categoria_selecionada}")
+    
+    # Filtragem dos detalhes
     df_detalhe = df_filtrado[df_filtrado["categoria"] == categoria_selecionada].copy()
     df_detalhe = df_detalhe[["data", "descricao", "valor", "banco"]].sort_values("data", ascending=False)
+    
     st.dataframe(
         df_detalhe,
-        width = 'stretch',
+        use_container_width=True,
         hide_index=True,
         column_config={
             "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-            "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f")
+            "valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f"),
+            "descricao": "Descrição",
+            "banco": "Banco"
         }
     )
     st.caption(f"Total: {formatar(df_detalhe['valor'].sum())}")
-
 # --- BOTÃO DE RELATÓRIO (PDF) ---
 st.write("---")
 col_rel, _ = st.columns([1, 1])
