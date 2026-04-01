@@ -33,6 +33,10 @@ cookie_manager = stx.CookieManager()
 # ---------------------------
 token = cookie_manager.get("session_token")
 
+# fallback para session_state caso o cookie ainda não tenha persistido
+if not token or token == "":
+    token = st.session_state.get("session_token")
+
 if not token or token == "":
     token = None
 
@@ -65,6 +69,7 @@ if not usuario:
                 token = criar_session_token(user["email"])
 
                 cookie_manager.set("session_token", token)
+                st.session_state["session_token"] = token  # salva no session_state como fallback
 
                 st.success("Login realizado com sucesso!")
                 time.sleep(1)
@@ -106,12 +111,9 @@ usuario_atual = usuario.email
 nome_usuario = usuario.name
 
 # -------- LOGOUT --------
-
-
 if st.sidebar.button("🚪 Sair"):
     cookie_manager.delete("session_token")
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
+    st.session_state.pop("session_token", None)
     time.sleep(0.5)
     st.rerun()
 
