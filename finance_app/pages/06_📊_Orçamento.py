@@ -263,7 +263,7 @@ if not df_edit.empty:
         ]
     )
     chart_final = alt.layer(bar_orc, bar_real).properties(height=alt.Step(40))
-    st.altair_chart(chart_final, use_container_width=True)
+    st.altair_chart(chart_final, width='stretch')
 
 # -----------------------------
 # 7. Métricas Finais
