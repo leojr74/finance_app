@@ -24,7 +24,7 @@ apply_global_style()
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.title("✍️ Inclusão Manual de Transações")
-st.markdown(f"Registre gastos para a conta de **{st.session_state['name']}**.")
+st.markdown(f"Registre gastos para a conta de **{st.session_state['user_name']}**.")
 
 # --- 1. CARREGAMENTO DE OPÇÕES (BANCOS E CATEGORIAS) ---
 regras_usuario = carregar_regras_db(usuario_atual)
