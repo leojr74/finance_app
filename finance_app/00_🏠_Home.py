@@ -29,31 +29,35 @@ criar_tabela()
 
 cookie_manager = stx.CookieManager()
 
-# ---------------------------
 # 🔐 VERIFICA SESSÃO
 # ---------------------------
 usuario = None
 token = None
 
 try:
-    if st.session_state.get("logged_out"):
-        st.session_state.pop("logged_out", None)
-    else:
-        token = st.session_state.get("session_token")
+    # tokens invalidados nessa sessão — nunca relê do cookie
+    blacklist = st.session_state.get("token_blacklist", set())
 
-        if not token:
-            token = cookie_manager.get("session_token")
-            if token:
-                st.session_state["session_token"] = token
+    token = st.session_state.get("session_token")
 
-        if not token or token == "":
+    if not token:
+        token = cookie_manager.get("session_token")
+        if token:
+            st.session_state["session_token"] = token
+
+    if not token or token == "" or token in blacklist:
+        token = None
+
+    if token:
+        user = buscar_usuario_por_token(token)
+        if user:
+            usuario = user
+        else:
+            # token inválido no banco — limpa
+            st.session_state.pop("session_token", None)
             token = None
 
-        if token:
-            user = buscar_usuario_por_token(token)
-            if user:
-                usuario = user
-except Exception as e:
+except Exception:
     st.session_state.clear()
     token = None
     usuario = None
@@ -122,9 +126,11 @@ usuario_atual = usuario.email
 nome_usuario = usuario.name
 
 if st.sidebar.button("🚪 Sair"):
-    invalidar_session_token(usuario_atual)   # invalida no banco
-    st.session_state.clear()                 # limpa session_state
-    cookie_manager.delete("session_token")   # tenta limpar o cookie
+    token_atual = st.session_state.get("session_token")
+    invalidar_session_token(usuario_atual)
+    st.session_state.clear()
+    st.session_state["token_blacklist"] = {token_atual}  # bloqueia esse token
+    cookie_manager.delete("session_token")
     st.rerun()
 
 # ---------------------------
