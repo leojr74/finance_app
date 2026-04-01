@@ -7,21 +7,16 @@ from ui import apply_global_style
 from database import get_engine, carregar_transacoes, carregar_regras_db
 from sqlalchemy import text
 from categorizer import find_category
+from utils.auth import check_login
 
 st.set_page_config(
-    page_title="Importação de SMS",
-    page_icon="📱",
+    page_title="Importação de Faturas",
+    page_icon="📥",
     layout="wide"
 )
 
-# 🔥 RESTAURA SESSÃO VIA URL (igual Home)
-if not st.session_state.get("logged_in"):
-    user_url = st.query_params.get("user")
 
-    if user_url:
-        st.session_state["logged_in"] = True
-        st.session_state["user"] = user_url
-        st.session_state["user_name"] = user_url  # fallback
+usuario_atual = check_login()
 
 
 # 🔐 PROTEÇÃO DE PÁGINA
