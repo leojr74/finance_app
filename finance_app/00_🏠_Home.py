@@ -109,11 +109,10 @@ nome_usuario = usuario.name
 
 
 if st.sidebar.button("🚪 Sair"):
-    cookie_manager.set(
-        "session_token",
-        "",
-        expires_at=datetime.datetime.now() - datetime.timedelta(days=1)
-    )
+    cookie_manager.delete("session_token")
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    time.sleep(0.5)
     st.rerun()
 
 # ---------------------------
