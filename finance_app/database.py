@@ -46,6 +46,15 @@ def buscar_usuario_por_token(token):
 
     return user
 
+def invalidar_session_token(email):
+    engine = get_engine()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            UPDATE usuarios
+            SET session_token = NULL
+            WHERE email = :e
+        """), {"e": email})
+
 # =========================
 # USUÁRIOS / AUTH
 # =========================
