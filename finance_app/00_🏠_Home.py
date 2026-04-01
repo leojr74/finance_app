@@ -11,7 +11,8 @@ from database import (
     get_gastos_fixos,
     salvar_config_categoria,
     criar_session_token,
-    buscar_usuario_por_token
+    buscar_usuario_por_token,
+    invalidar_session_token
 )
 
 # ---------------------------
@@ -121,9 +122,9 @@ usuario_atual = usuario.email
 nome_usuario = usuario.name
 
 if st.sidebar.button("🚪 Sair"):
-    st.session_state.clear()              # limpa tudo
-    st.session_state["logged_out"] = True # flag para não reler o cookie
-    cookie_manager.delete("session_token")
+    invalidar_session_token(usuario_atual)   # invalida no banco
+    st.session_state.clear()                 # limpa session_state
+    cookie_manager.delete("session_token")   # tenta limpar o cookie
     st.rerun()
 
 # ---------------------------
