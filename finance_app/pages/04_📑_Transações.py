@@ -14,7 +14,7 @@ st.set_page_config(
     layout="wide"
 )
 
-
+usuario_atual = check_login()
 
 apply_global_style()
 
