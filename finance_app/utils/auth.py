@@ -21,6 +21,7 @@ def check_login():
         st.stop()
 
     st.session_state["user"] = user.email
+    st.session_state["name"] = user.name
     st.session_state["user_name"] = user.name
 
     return user.email
