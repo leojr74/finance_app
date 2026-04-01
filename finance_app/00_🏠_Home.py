@@ -31,21 +31,31 @@ cookie_manager = stx.CookieManager()
 # ---------------------------
 # 🔐 VERIFICA SESSÃO
 # ---------------------------
+usuario = None
+token = None
 
-# Se acabou de fazer logout, não reler o cookie
-if st.session_state.get("logged_out"):
-    st.session_state.pop("logged_out", None)
-    token = None
-else:
-    token = st.session_state.get("session_token")
+try:
+    if st.session_state.get("logged_out"):
+        st.session_state.pop("logged_out", None)
+    else:
+        token = st.session_state.get("session_token")
 
-    if not token:
-        token = cookie_manager.get("session_token")
+        if not token:
+            token = cookie_manager.get("session_token")
+            if token:
+                st.session_state["session_token"] = token
+
+        if not token or token == "":
+            token = None
+
         if token:
-            st.session_state["session_token"] = token
-
-    if not token or token == "":
-        token = None
+            user = buscar_usuario_por_token(token)
+            if user:
+                usuario = user
+except Exception as e:
+    st.session_state.clear()
+    token = None
+    usuario = None
 
 # ---------------------------
 # 🔐 LOGIN / CADASTRO
