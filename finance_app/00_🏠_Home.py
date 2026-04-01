@@ -1,5 +1,7 @@
 import streamlit as st
 import time
+import extra_streamlit_components as stx
+
 from ui import apply_global_style
 from database import (
     criar_tabela,
@@ -7,8 +9,13 @@ from database import (
     salvar_novo_usuario_db,
     carregar_regras_db,
     get_gastos_fixos,
-    salvar_config_categoria
+    salvar_config_categoria,
+    criar_session_token,
+    buscar_usuario_por_token
 )
+
+# 🔥 COOKIE MANAGER
+cookie_manager = stx.CookieManager()
 
 st.set_page_config(
     page_title="Finanças Pessoais",
@@ -18,6 +25,22 @@ st.set_page_config(
 
 apply_global_style()
 criar_tabela()
+
+# =========================
+# 🔥 RESTAURA LOGIN VIA COOKIE
+# =========================
+if not st.session_state.get("logged_in"):
+
+    token = cookie_manager.get("session_token")
+
+    if token:
+        user = buscar_usuario_por_token(token)
+
+        if user:
+            st.session_state["logged_in"] = True
+            st.session_state["user"] = user.email
+            st.session_state["user_name"] = user.name
+
 
 # =========================
 # 🔐 LOGIN / CADASTRO
@@ -38,15 +61,18 @@ if not st.session_state.get("logged_in"):
             user = verificar_login(email, senha)
 
             if user:
-                from database import criar_session_token
-
                 token = criar_session_token(user["email"])
+
+                # 🔥 salva no cookie (ESSENCIAL)
+                cookie_manager.set(
+                    "session_token",
+                    token,
+                    expires_at=None
+                )
 
                 st.session_state["logged_in"] = True
                 st.session_state["user"] = user["email"]
                 st.session_state["user_name"] = user["name"]
-
-               
 
                 st.success("Login realizado com sucesso!")
                 time.sleep(1)
@@ -89,6 +115,7 @@ usuario_atual = st.session_state["user"]
 
 # -------- LOGOUT --------
 if st.sidebar.button("🚪 Sair"):
+    cookie_manager.delete("session_token")  # 🔥 limpa cookie
     st.session_state.clear()
     st.rerun()
 
@@ -161,4 +188,4 @@ with st.expander("⚙️ Configurações do Sistema", expanded=True):
         st.info("Nenhuma categoria encontrada.")
 
 st.write("---")
-st.caption("v3.1 | Sistema Financeiro (login persistente 🚀)")
+st.caption("v4.0 | Sistema Financeiro (auth estável 🚀)")

@@ -1,13 +1,11 @@
 def check_login():
     import streamlit as st
+    import extra_streamlit_components as stx
     from database import buscar_usuario_por_token
 
-    # ✅ 1. já está logado → segue
-    if st.session_state.get("logged_in"):
-        return st.session_state["user"]
+    cookie_manager = stx.CookieManager()
 
-    # ✅ 2. tenta restaurar via token salvo
-    token = st.session_state.get("token")
+    token = cookie_manager.get("session_token")
 
     if token:
         user = buscar_usuario_por_token(token)
@@ -18,6 +16,5 @@ def check_login():
             st.session_state["user_name"] = user.name
             return user.email
 
-    # ❌ 3. bloqueia
     st.warning("Faça login para continuar")
     st.stop()
