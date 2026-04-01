@@ -29,13 +29,16 @@ criar_tabela()
 cookie_manager = stx.CookieManager()
 
 # ---------------------------
-# 🔐 VERIFICA COOKIE
+# 🔐 VERIFICA SESSÃO
 # ---------------------------
-token = cookie_manager.get("session_token")
 
-# fallback para session_state caso o cookie ainda não tenha persistido
-if not token or token == "":
-    token = st.session_state.get("session_token")
+# Prioriza session_state (imediato), usa cookie só como fallback (reload/nova aba)
+token = st.session_state.get("session_token")
+
+if not token:
+    token = cookie_manager.get("session_token")
+    if token:
+        st.session_state["session_token"] = token  # sincroniza
 
 if not token or token == "":
     token = None
@@ -68,8 +71,8 @@ if not usuario:
             if user:
                 token = criar_session_token(user["email"])
 
-                cookie_manager.set("session_token", token)
-                st.session_state["session_token"] = token  # salva no session_state como fallback
+                st.session_state["session_token"] = token  # salva imediatamente
+                cookie_manager.set("session_token", token) # persiste para reloads
 
                 st.success("Login realizado com sucesso!")
                 time.sleep(1)
@@ -112,9 +115,8 @@ nome_usuario = usuario.name
 
 # -------- LOGOUT --------
 if st.sidebar.button("🚪 Sair"):
-    cookie_manager.delete("session_token")
-    st.session_state.pop("session_token", None)
-    time.sleep(0.5)
+    st.session_state.pop("session_token", None)  # imediato — garante o logout
+    cookie_manager.delete("session_token")        # remove o cookie (pode demorar, mas não importa)
     st.rerun()
 
 # ---------------------------
