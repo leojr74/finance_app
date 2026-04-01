@@ -25,15 +25,19 @@ criar_tabela()
 
 # --- AUTENTICAÇÃO CENTRALIZADA ---
 authenticator = get_authenticator()
+authenticator.login(location='unrendered')
+auth_status = st.session_state.get("authentication_status")
 
-# CRÍTICO: login() deve ser chamado SEMPRE, antes de checar session_state.
-# É ele que lê o cookie JWT e restaura authentication_status no F5/rerun.
-if st.session_state.get("authentication_status") is None:
-    authenticator.login(location='unrendered')
-    # O CookieManager dispara um rerun automático na primeira execução.
-    # Se ainda estamos nesse rerun inicial, aguardamos silenciosamente.
-    if cookie_rerun_pendente():
-        st.stop()
+# ⏳ Ainda carregando (NÃO FAZ NADA)
+if auth_status is None:
+    st.stop()
+
+# ❌ Só bloqueia se tiver CERTEZA que não está logado
+if auth_status is False:
+    st.warning("Sessão expirada. Faça login novamente.")
+    st.stop()
+
+usuario_atual = st.session_state["username"]
 
 # --- INTERFACE DE ACESSO (LOGIN / CADASTRO) ---
 if st.session_state.get("authentication_status") is None:
