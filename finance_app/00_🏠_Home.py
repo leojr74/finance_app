@@ -8,7 +8,8 @@ from database import (
     carregar_regras_db, 
     get_gastos_fixos, 
     salvar_config_categoria,
-    get_authenticator # Nova função centralizada
+    get_authenticator,
+    invalidar_cache_authenticator
 )
 
 
@@ -22,8 +23,14 @@ apply_global_style()
 criar_tabela()
 
 # --- AUTENTICAÇÃO CENTRALIZADA ---
-# Substituímos todo o bloco de abertura de arquivo por esta chamada:
 authenticator = get_authenticator()
+
+# CRÍTICO: login() deve ser chamado SEMPRE, antes de checar session_state.
+# É ele que lê o cookie JWT e restaura authentication_status no F5/rerun.
+# Quando já logado, location='unrendered' evita renderizar o formulário.
+if not st.session_state.get("authentication_status"):
+    # Ainda não logado: tenta restaurar via cookie antes de mostrar o form
+    authenticator.login(location='unrendered')
 
 # --- INTERFACE DE ACESSO (LOGIN / CADASTRO) ---
 if not st.session_state.get("authentication_status"):
@@ -111,6 +118,9 @@ if not st.session_state.get("authentication_status"):
                             )
 
                             if sucesso_db:
+                                # Invalida o cache do authenticator para que o novo
+                                # usuário seja carregado na próxima instância
+                                invalidar_cache_authenticator()
                                 st.success(f'✅ Conta para {nome_novo} criada com sucesso!')
                                 st.balloons()
                         else:

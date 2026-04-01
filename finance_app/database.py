@@ -18,29 +18,34 @@ def get_engine():
     # pool_pre_ping=True ajuda a evitar erros de conexão ociosa (comum no Streamlit/Supabase)
     return create_engine(db_url, pool_pre_ping=True)
 
+@st.cache_data(ttl=300)
+def _carregar_credentials_cache():
+    """Cacheia apenas dados puros de credenciais (sem widgets). TTL=5min."""
+    return carregar_usuarios_db()
+
 def get_authenticator():
     """
-    Retorna o objeto de autenticação configurado sem depender de arquivos YAML.
+    Retorna o objeto Authenticate reutilizando-o entre reruns via session_state.
+    O Authenticate instancia um CookieManager (widget) e por isso não pode
+    ficar em @st.cache_resource. Cacheamos só as credenciais e guardamos
+    o objeto no session_state para que o mesmo JWT seja validado no F5.
     """
-    # 1. Busca as credenciais diretamente do Banco de Dados (Supabase/Postgres)
-    credentials = carregar_usuarios_db()
-    
-    # 2. Configurações que antes ficavam no YAML, agora ficam direto no código
-    cookie_name = "finance_app_cookie"
-    cookie_expiry_days = 30 
-    
-    # 3. Busca a chave mestra do seu secrets.toml
-    # Certifique-se que existe [auth] cookie_key = "sua_chave" no seu secrets
-    cookie_key = st.secrets["auth"]["cookie_key"]
-    
-    # 4. Retorna o objeto Authenticate configurado
-    return stauth.Authenticate(
-        credentials=credentials,
-        cookie_name=cookie_name,
-        cookie_key=cookie_key,
-        cookie_expiry_days=cookie_expiry_days,
-        validator=None # Opcional, dependendo da versão do seu streamlit-authenticator
-    )
+    if "authenticator" not in st.session_state:
+        credentials = _carregar_credentials_cache()
+        cookie_key  = st.secrets["auth"]["cookie_key"]
+        st.session_state["authenticator"] = stauth.Authenticate(
+            credentials=credentials,
+            cookie_name="finance_app_cookie",
+            cookie_key=cookie_key,
+            cookie_expiry_days=30,
+            validator=None
+        )
+    return st.session_state["authenticator"]
+
+def invalidar_cache_authenticator():
+    """Chame após cadastrar novo usuário para forçar recarga das credenciais."""
+    _carregar_credentials_cache.clear()
+    st.session_state.pop("authenticator", None)
 
 def criar_tabela():
     """Cria ou atualiza a estrutura das tabelas no Supabase."""
