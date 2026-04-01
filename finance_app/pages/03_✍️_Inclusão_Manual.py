@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import date
 from categorizer import find_category
 from ui import apply_global_style
-from database import get_authenticator, cookie_rerun_pendente, carregar_regras_db, salvar_regra_db, get_engine
+from database import carregar_regras_db, get_engine
 from sqlalchemy import text
 
 st.set_page_config(
@@ -12,21 +12,13 @@ st.set_page_config(
     layout="wide"
 )
 
-authenticator = get_authenticator()
-authenticator.login(location='unrendered')
-
-auth_status = st.session_state.get("authentication_status")
-
-# ⏳ Ainda carregando (NÃO FAZ NADA)
-if auth_status is None:
+# 🔐 VERIFICA LOGIN
+if not st.session_state.get("logged_in"):
+    st.warning("Faça login para continuar")
     st.stop()
 
-# ❌ Só bloqueia se tiver CERTEZA que não está logado
-if auth_status is False:
-    st.warning("Sessão expirada. Faça login novamente.")
-    st.stop()
+usuario_atual = st.session_state["user"]
 
-usuario_atual = st.session_state["username"]
 apply_global_style()
 
 

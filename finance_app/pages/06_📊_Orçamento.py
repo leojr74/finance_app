@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, timedelta
+from datetime import date
 import altair as alt
 from database import (
     carregar_transacoes,
     criar_tabela,
-    get_authenticator,
-    cookie_rerun_pendente,
     salvar_orcamento,
     get_gastos_fixos,
     carregar_orcamentos,
@@ -14,7 +12,6 @@ from database import (
 )
 from ui import apply_global_style
 from fpdf import FPDF
-import io
 
 st.set_page_config(
     page_title="Planejamento de Orçamento",
@@ -22,22 +19,15 @@ st.set_page_config(
     layout="wide"
 )
 
-authenticator = get_authenticator()
-authenticator.login(location='unrendered')
-
-auth_status = st.session_state.get("authentication_status")
-
-# ⏳ Ainda carregando (NÃO FAZ NADA)
-if auth_status is None:
+# --- 1. AUTENTICAÇÃO E SEGURANÇA ---
+# 🔐 VERIFICA LOGIN
+if not st.session_state.get("logged_in"):
+    st.warning("Faça login para continuar")
     st.stop()
 
-# ❌ Só bloqueia se tiver CERTEZA que não está logado
-if auth_status is False:
-    st.warning("Sessão expirada. Faça login novamente.")
-    st.stop()
-
-usuario_atual = st.session_state["username"]
+usuario_atual = st.session_state["user"]
 apply_global_style()
+
 st.title("📊 Planejamento de Orçamento")
 
 # Garante a estrutura do banco
