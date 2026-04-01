@@ -10,7 +10,7 @@ from categorizer import find_category
 from utils.auth import check_login
 
 st.set_page_config(
-    page_title="Importação de Faturas",
+    page_title="Importação de SMS",
     page_icon="📥",
     layout="wide"
 )
