@@ -23,125 +23,59 @@ st.set_page_config(
 apply_global_style()
 criar_tabela()
 
-# --- AUTENTICAÇÃO CENTRALIZADA ---
 authenticator = get_authenticator()
 
-# 🔥 PRIMEIRO: renderiza / processa login
+# --- LOGIN ---
 authenticator.login(location='main')
 
-# 🔥 DEPOIS: verifica status
-auth_status = st.session_state.get("authentication_status")
+# --- CONTROLE DE SESSÃO ---
+if st.session_state.get("authentication_status"):
+    st.session_state["logged_in"] = True
+    st.session_state["user"] = st.session_state.get("username")
 
-# ⏳ ainda carregando cookie → espera
-if auth_status is None:
-    st.stop()
+logado = st.session_state.get("logged_in", False)
 
-# ❌ não logado → mostra login (já está na tela)
-if auth_status is False:
-    st.stop()
+# --- SE NÃO ESTIVER LOGADO ---
+if not logado:
 
-# ✅ logado
-usuario_atual = st.session_state["username"]
+    st.title("💰 Sistema de Gestão Financeira")
 
-# --- INTERFACE DE ACESSO (LOGIN / CADASTRO) ---
-if st.session_state.get("authentication_status") is None:
-    _, col_central, _ = st.columns([1, 2, 1])
-    
-    with col_central:
-        tab_login, tab_signup = st.tabs(["🔐 Entrar", "📝 Criar Conta"])
-        
-        with tab_login:
-            authenticator.login(
+    st.info("Faça login ou crie uma conta para continuar.")
+
+    # 🔥 CADASTRO VISÍVEL
+    with st.expander("📝 Criar Conta"):
+        try:
+            resultado = authenticator.register_user(
                 location='main',
-                fields={
-                    'Form name': 'Acesso',
-                    'Username': 'Email',
-                    'Password': 'Senha',
-                    'Login': 'Entrar'
-                }
+                pre_authorized=None,
+                captcha=False
             )
-            if st.session_state.get("authentication_status") is False:
-                st.error('Usuário ou senha incorretos')
-            elif st.session_state.get("authentication_status") is None:
-                st.info('Por favor, faça login para acessar.')
 
-        with tab_signup:
-            try:
-                # 1. Renderiza o formulário (pre_authorized=None funcionou para você)
-                resultado = authenticator.register_user(
-                    location='main',
-                    pre_authorized=None, 
-                    captcha=False,
-                    fields={
-                        'Form name': 'Criar Conta',
-                        'First name': 'Nome',
-                        'Last name': 'Sobrenome',
-                        'Email': 'Email',
-                        'Username': 'Usuário',
-                        'Password': 'Senha',
-                        'Repeat password': 'Repetir Senha',
-                        'Register': 'Cadastrar'
-                    }
+            if resultado and resultado[0]:
+                email_novo, username_novo, nome_novo = resultado
+
+                model = authenticator.authentication_controller.authentication_model
+                senha_hash = model.credentials['usernames'][username_novo]['password']
+
+                from database import salvar_novo_usuario_db
+
+                salvar_novo_usuario_db(
+                    username=email_novo,
+                    email=email_novo,
+                    name=nome_novo,
+                    password_hashed=senha_hash
                 )
 
-                # 2. A TRAVA REAL: Só processa se 'resultado' existir E o primeiro campo (email) tiver texto
-                if resultado and resultado[0]: 
-                    email_novo, username_novo, nome_novo = resultado
-                    
-                    # Busca o hash no controlador (conforme o dir() que fizemos)
-                    user_data = None
-                    controller = getattr(authenticator, 'authentication_controller', None)
-                    
-                    if controller:
-                        for attr in ['credentials', 'user_dict', 'config']:
-                            target = getattr(controller, attr, {})
-                            if isinstance(target, dict) and 'usernames' in target:
-                                user_data = target['usernames'].get(username_novo)
-                                if user_data: break
+                st.success("Conta criada com sucesso!")
+                st.rerun()
 
-                    # 3. SALVAMENTO NO BANCO
-                    if resultado and resultado[0]: 
-                        email_novo, username_novo, nome_novo = resultado
-                        
-                        # --- BUSCA EXAUSTIVA ---
-                        user_data = None
-                        try:
-                            # O controller delega para o model, que contém o 'user_dict' ou 'credentials'
-                            model = authenticator.authentication_controller.authentication_model
-                            
-                            # Buscamos o dicionário de usuários dentro do model
-                            # Geralmente nesta versão o atributo se chama 'user_dict' ou 'credentials'
-                            for attr in ['user_dict', 'credentials', 'config']:
-                                target = getattr(model, attr, {})
-                                if isinstance(target, dict) and 'usernames' in target:
-                                    user_data = target['usernames'].get(username_novo)
-                                    if user_data: break
-                        except Exception:
-                            pass
+        except Exception as e:
+            st.error(f"Erro ao cadastrar: {e}")
 
-                        # --- VALIDAÇÃO E SALVAMENTO ---
-                        if user_data and 'password' in user_data:
-                            sucesso_db = salvar_novo_usuario_db(
-                                username=email_novo,
-                                email=email_novo,
-                                name=nome_novo,
-                                password_hashed=user_data['password']
-                            )
+    st.stop()
 
-                            if sucesso_db:
-                                # Invalida o cache do authenticator para que o novo
-                                # usuário seja carregado na próxima instância
-                                invalidar_cache_authenticator()
-                                st.success(f'✅ Conta para {nome_novo} criada com sucesso!')
-                                st.balloons()
-                        else:
-                            # Se falhar, vamos ver o que tem dentro do user_data para diagnosticar
-                            st.error("Erro ao localizar hash da senha.")
-                            
-            except Exception as e:
-                # Silencia o erro de inicialização do Streamlit
-                if "NoneType" not in str(e):
-                    st.error(f"Erro no processo de cadastro: {e}")
+# --- SE ESTIVER LOGADO ---
+usuario_atual = st.session_state.get("user")
 
 # --- CONTEÚDO LOGADO ---
 if st.session_state.get("authentication_status"):
