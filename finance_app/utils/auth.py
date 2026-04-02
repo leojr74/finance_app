@@ -3,38 +3,31 @@ def check_login():
     import extra_streamlit_components as stx
     from database import buscar_usuario_por_token
 
-    # Se já tem token no session_state, usa direto (sem precisar do cookie)
     token = st.session_state.get("session_token")
 
     if not token:
-        # Tenta ler o cookie
         cookie_manager = stx.CookieManager(key="auth_check")
         token = cookie_manager.get("session_token")
 
         if token:
-            # Sincroniza com session_state para próximas páginas
             st.session_state["session_token"] = token
         else:
-            # Cookie ainda não carregou — aguarda mais um render silencioso
-            if not st.session_state.get("_cookie_checked"):
-                st.session_state["_cookie_checked"] = True
+            tentativas = st.session_state.get("_cookie_check_count", 0)
+            if tentativas < 2:  # aguarda até 2 renders
+                st.session_state["_cookie_check_count"] = tentativas + 1
                 st.rerun()
 
-            # Segundo render sem token = não está logado
-            st.session_state.pop("_cookie_checked", None)
+            st.session_state.pop("_cookie_check_count", None)
             st.warning("Faça login para continuar")
             st.stop()
 
-    # Limpa flag de verificação
-    st.session_state.pop("_cookie_checked", None)
+    st.session_state.pop("_cookie_check_count", None)
 
-    # Verifica blacklist (logout recente)
     blacklist = st.session_state.get("token_blacklist", set())
     if token in blacklist:
         st.warning("Faça login para continuar")
         st.stop()
 
-    # Valida token no banco
     user = buscar_usuario_por_token(token)
 
     if not user:
