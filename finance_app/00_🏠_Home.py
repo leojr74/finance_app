@@ -65,6 +65,14 @@ except Exception:
 # ---------------------------
 if not usuario:
 
+    if not st.session_state.get("_home_checked"):
+        st.session_state["_home_checked"] = True
+        with st.spinner(""):
+            time.sleep(0.5)
+        st.rerun()
+
+    st.session_state.pop("_home_checked", None)
+
     st.title("💰 Sistema de Gestão Financeira")
 
     tab_login, tab_signup = st.tabs(["🔐 Entrar", "📝 Criar Conta"])
