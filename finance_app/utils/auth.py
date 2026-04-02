@@ -1,12 +1,13 @@
 def check_login():
     import streamlit as st
+    import extra_streamlit_components as stx
     from database import buscar_usuario_por_token
 
     token = st.session_state.get("session_token")
 
     if not token:
-        # lê o cookie nativamente — síncrono, sem delay
-        token = st.context.cookies.get("session_token")
+        cookie_manager = stx.CookieManager(key="auth_check")
+        token = cookie_manager.get("session_token")
         if token:
             st.session_state["session_token"] = token
 

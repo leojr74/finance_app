@@ -26,7 +26,6 @@ st.set_page_config(
 apply_global_style()
 criar_tabela()
 
-# CookieManager só aqui — usado para escrever e deletar o cookie
 cookie_manager = stx.CookieManager()
 
 # ---------------------------
@@ -41,8 +40,7 @@ try:
     token = st.session_state.get("session_token")
 
     if not token:
-        # lê o cookie nativamente — síncrono
-        token = st.context.cookies.get("session_token")
+        token = cookie_manager.get("session_token")
         if token:
             st.session_state["session_token"] = token
 
