@@ -2,6 +2,7 @@ def check_login():
     import streamlit as st
     import extra_streamlit_components as stx
     from database import buscar_usuario_por_token
+    from datetime import time
 
     token = st.session_state.get("session_token")
 
@@ -12,8 +13,9 @@ def check_login():
             st.session_state["session_token"] = token
 
     if not token:
-        st.warning("Faça login para continuar")
-        st.stop()
+        with st.spinner(""):
+            time.sleep(0.5)
+        st.rerun()
 
     blacklist = st.session_state.get("token_blacklist", set())
     if token in blacklist:
