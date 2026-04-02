@@ -9,31 +9,23 @@ def check_login():
         cookie_manager = stx.CookieManager(key="auth_check")
         token = cookie_manager.get("session_token")
 
-        if token:
-            st.session_state["session_token"] = token
-        else:
-            tentativas = st.session_state.get("_cookie_check_count", 0)
-            if tentativas < 2:  # aguarda até 2 renders
-                st.session_state["_cookie_check_count"] = tentativas + 1
-                st.rerun()
+        tentativas = st.session_state.get("_cookie_check_count", 0)
+        
+        # mostra o estado atual para debug
+        st.info(f"Render #{tentativas + 1} | token do cookie: {token}")
+        st.stop()
 
-            st.session_state.pop("_cookie_check_count", None)
-            st.warning("Faça login para continuar")
-            st.stop()
-
-    st.session_state.pop("_cookie_check_count", None)
+    st.session_state["session_token"] = token
 
     blacklist = st.session_state.get("token_blacklist", set())
-    if token in blacklist:
-        st.warning("Faça login para continuar")
-        st.stop()
+    if not token or token in blacklist:
+        # Redireciona para home sem mostrar nenhuma mensagem
+        st.switch_page("00_🏠_Home.py")
 
     user = buscar_usuario_por_token(token)
-
     if not user:
         st.session_state.pop("session_token", None)
-        st.warning("Sessão inválida. Faça login novamente.")
-        st.stop()
+        st.switch_page("00_🏠_Home.py")
 
     st.session_state["user"] = user.email
     st.session_state["name"] = user.name
