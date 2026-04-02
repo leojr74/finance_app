@@ -1,7 +1,6 @@
 import streamlit as st
 import time
 import extra_streamlit_components as stx
-import datetime
 from ui import apply_global_style
 from database import (
     criar_tabela,
@@ -27,25 +26,27 @@ st.set_page_config(
 apply_global_style()
 criar_tabela()
 
+# CookieManager só aqui — usado para escrever e deletar o cookie
 cookie_manager = stx.CookieManager()
 
+# ---------------------------
 # 🔐 VERIFICA SESSÃO
 # ---------------------------
 usuario = None
 token = None
 
 try:
-    # tokens invalidados nessa sessão — nunca relê do cookie
     blacklist = st.session_state.get("token_blacklist", set())
 
     token = st.session_state.get("session_token")
 
     if not token:
-        token = cookie_manager.get("session_token")
+        # lê o cookie nativamente — síncrono
+        token = st.context.cookies.get("session_token")
         if token:
             st.session_state["session_token"] = token
 
-    if not token or token == "" or token in blacklist:
+    if not token or token in blacklist:
         token = None
 
     if token:
@@ -53,7 +54,6 @@ try:
         if user:
             usuario = user
         else:
-            # token inválido no banco — limpa
             st.session_state.pop("session_token", None)
             token = None
 
@@ -77,19 +77,16 @@ if not usuario:
         senha = st.text_input("Senha", type="password")
 
         if st.button("Entrar"):
-
             user = verificar_login(email, senha)
 
             if user:
                 token = criar_session_token(user["email"])
-
-                st.session_state["session_token"] = token  # salva imediatamente
-                cookie_manager.set("session_token", token) # persiste para reloads
+                st.session_state["session_token"] = token
+                cookie_manager.set("session_token", token)
 
                 st.success("Login realizado com sucesso!")
                 time.sleep(1)
                 st.rerun()
-
             else:
                 st.error("Email ou senha inválidos")
 
@@ -100,10 +97,8 @@ if not usuario:
         senha_nova = st.text_input("Senha", type="password", key="cad_senha")
 
         if st.button("Cadastrar"):
-
             if not nome or not email_novo or not senha_nova:
                 st.warning("Preencha todos os campos")
-
             else:
                 sucesso = salvar_novo_usuario_db(
                     username=email_novo,
@@ -111,7 +106,6 @@ if not usuario:
                     name=nome,
                     senha_plana=senha_nova
                 )
-
                 if sucesso:
                     st.success("✅ Conta criada com sucesso! Faça login.")
                     time.sleep(1.5)
@@ -125,11 +119,12 @@ if not usuario:
 usuario_atual = usuario.email
 nome_usuario = usuario.name
 
+# -------- LOGOUT --------
 if st.sidebar.button("🚪 Sair"):
     token_atual = st.session_state.get("session_token")
     invalidar_session_token(usuario_atual)
     st.session_state.clear()
-    st.session_state["token_blacklist"] = {token_atual}  # bloqueia esse token
+    st.session_state["token_blacklist"] = {token_atual}
     cookie_manager.delete("session_token")
     st.rerun()
 
