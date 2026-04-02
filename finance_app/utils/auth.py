@@ -3,30 +3,19 @@ def check_login():
     import extra_streamlit_components as stx
     from database import buscar_usuario_por_token
 
+    # renderiza o componente sempre — necessário para ele funcionar
+    cookie_manager = stx.CookieManager(key="auth_check")
+
     token = st.session_state.get("session_token")
 
     if not token:
-        # esconde tudo enquanto verifica o cookie
-        placeholder = st.empty()
-        
-        cookie_manager = stx.CookieManager(key="auth_check")
         token = cookie_manager.get("session_token")
-
         if token:
             st.session_state["session_token"] = token
-            placeholder.empty()
-        else:
-            tentativas = st.session_state.get("_cookie_check_count", 0)
-            if tentativas < 1:
-                st.session_state["_cookie_check_count"] = tentativas + 1
-                placeholder.empty()
-                st.rerun()
 
-            st.session_state.pop("_cookie_check_count", None)
-            st.warning("Faça login para continuar")
-            st.stop()
-
-    st.session_state.pop("_cookie_check_count", None)
+    if not token:
+        st.warning("Faça login para continuar")
+        st.stop()
 
     blacklist = st.session_state.get("token_blacklist", set())
     if token in blacklist:
