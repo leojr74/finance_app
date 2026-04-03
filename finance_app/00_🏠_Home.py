@@ -65,16 +65,14 @@ except Exception:
 # ---------------------------
 if not usuario:
 
-    # spinner silencioso só no primeiro render e só se o usuário não interagiu ainda
-    if not st.session_state.get("_home_checked") and not st.session_state.get("_login_tentado"):
-        st.session_state["_home_checked"] = True
-        with st.spinner(""):
-            time.sleep(0.5)
-        st.rerun()
-
-    st.session_state.pop("_home_checked", None)
-
     st.title("💰 Sistema de Gestão Financeira")
+
+    # cadastro concluído — mostra mensagem no lugar do formulário
+    if st.session_state.get("_cadastro_ok"):
+        st.session_state.pop("_cadastro_ok", None)
+        st.success("✅ Conta criada com sucesso!")
+        st.info("Faça login na aba **Entrar**.")
+        st.stop()
 
     tab_login, tab_signup = st.tabs(["🔐 Entrar", "📝 Criar Conta"])
 
@@ -84,13 +82,11 @@ if not usuario:
         senha = st.text_input("Senha", type="password")
 
         if st.button("Entrar"):
-            st.session_state["_login_tentado"] = True
             user = verificar_login(email, senha)
 
             if user:
                 token = criar_session_token(user["email"])
                 st.session_state["session_token"] = token
-                st.session_state.pop("_login_tentado", None)
                 cookie_manager.set("session_token", token)
 
                 st.success("Login realizado com sucesso!")
@@ -101,13 +97,17 @@ if not usuario:
 
     # -------- CADASTRO --------
     with tab_signup:
-        nome = st.text_input("Nome")
-        email_novo = st.text_input("Email", key="cad_email")
-        senha_nova = st.text_input("Senha", type="password", key="cad_senha")
+        cad_key = st.session_state.get("_cad_key", 0)
+        nome = st.text_input("Nome", key=f"cad_nome_{cad_key}")
+        email_novo = st.text_input("Email", key=f"cad_email_{cad_key}")
+        senha_nova = st.text_input("Senha", type="password", key=f"cad_senha_{cad_key}")
+        senha_nova2 = st.text_input("Confirme a senha", type="password", key=f"cad_senha2_{cad_key}")
 
         if st.button("Cadastrar"):
-            if not nome or not email_novo or not senha_nova:
+            if not nome or not email_novo or not senha_nova or not senha_nova2:
                 st.warning("Preencha todos os campos")
+            elif senha_nova != senha_nova2:
+                st.error("As senhas não coincidem")
             else:
                 sucesso = salvar_novo_usuario_db(
                     username=email_novo,
@@ -116,9 +116,11 @@ if not usuario:
                     senha_plana=senha_nova
                 )
                 if sucesso:
-                    st.success("✅ Conta criada com sucesso! Faça login.")
-                    time.sleep(1.5)
+                    st.session_state["_cad_key"] = cad_key + 1
+                    st.session_state["_cadastro_ok"] = True
                     st.rerun()
+                else:
+                    st.error("Erro ao cadastrar. Tente novamente.")
 
     st.stop()
 
