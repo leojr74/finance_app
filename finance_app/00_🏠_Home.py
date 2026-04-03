@@ -65,7 +65,8 @@ except Exception:
 # ---------------------------
 if not usuario:
 
-    if not st.session_state.get("_home_checked"):
+    # spinner silencioso só no primeiro render e só se o usuário não interagiu ainda
+    if not st.session_state.get("_home_checked") and not st.session_state.get("_login_tentado"):
         st.session_state["_home_checked"] = True
         with st.spinner(""):
             time.sleep(0.5)
@@ -83,11 +84,13 @@ if not usuario:
         senha = st.text_input("Senha", type="password")
 
         if st.button("Entrar"):
+            st.session_state["_login_tentado"] = True
             user = verificar_login(email, senha)
 
             if user:
                 token = criar_session_token(user["email"])
                 st.session_state["session_token"] = token
+                st.session_state.pop("_login_tentado", None)
                 cookie_manager.set("session_token", token)
 
                 st.success("Login realizado com sucesso!")
