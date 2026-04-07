@@ -87,6 +87,10 @@ if btn_processar:
             # Ex: CARTAO AMAZON: ... 31/03/2026 11:20. VALOR DE R$69,97, AMAZONMKTPLC*PURONUTRI.
             match_amazon = re.search(r"CARTAO (AMAZON):.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$([\d\.,]+), (.*?)\.", bloco, re.IGNORECASE)
 
+            # --- PADRÃO 3: BRADESCO (NOVO) ---
+            # Ex: BRADESCO CARTOES: COMPRA APROVADA NO CARTAO FINAL 9808 EM 06/04/2026 17:18. VALOR DE R$ 110,00 BRADESCO AUT*08DE10      RIO DE JANEI.
+            match_bradesco = re.search(r"BRADESCO.*?:.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$ ([\d\.,]+) (.*?)\.", bloco, re.IGNORECASE)
+
             if match_padrao:
                 banco_raw = match_padrao.group(1).upper()
                 status = match_padrao.group(2).upper()
@@ -105,6 +109,29 @@ if btn_processar:
                 status = "APROVADA"
                 # Converte data completa (DD/MM/AAAA)
                 data_iso = datetime.strptime(data_full, "%d/%m/%Y").strftime('%Y-%m-%d')
+            
+            elif match_bradesco:
+                banco_raw = "BRADESCO"
+                data_full = match_bradesco.group(1)
+                valor_str = match_bradesco.group(2).replace('.', '').replace(',', '.')
+                estabelecimento_raw = match_bradesco.group(3).strip().upper()
+                status = "APROVADA"
+                data_iso = datetime.strptime(data_full, "%d/%m/%Y").strftime('%Y-%m-%d')
+                
+                # Identificar parcelas (ex: 08DE10)
+                match_parcela = re.search(r"(\d{2})DE(\d{2})", estabelecimento_raw)
+                
+                if match_parcela:
+                    parcela_atual = int(match_parcela.group(1))
+                    total_parcelas = int(match_parcela.group(2))
+                    # Remove a info de parcela do nome do estabelecimento para ficar mais limpo
+                    estabelecimento = re.sub(r"AUT\*\d{2}DE\d{2}", "", estabelecimento_raw).strip()
+                    
+                    # Opcional: Adicionar lógica para sugerir parcelas futuras
+                    # Por enquanto, vamos marcar na descrição para você saber que é a 8/10
+                    estabelecimento = f"{estabelecimento} ({parcela_atual}/{total_parcelas})"
+                else:
+                    estabelecimento = estabelecimento_raw
 
             else:
                 continue # Pula se não bater com nenhum padrão
