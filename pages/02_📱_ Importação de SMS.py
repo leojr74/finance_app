@@ -211,7 +211,7 @@ if btn_processar:
             with st.container(border=True):
                 st.warning(f"💳 **Parcelamento Detectado:** {tp['desc']}")
                 st.write(f"Identificamos a parcela {tp['p_atual']} de {tp['p_total']}. Deseja projetar as próximas?")
-                
+
                 if st.button(f"⏩ Lançar as {tp['p_total'] - tp['p_atual']} parcelas restantes?"):
                     novas_parcelas = []
                     data_base = datetime.strptime(tp['data_origem'], '%Y-%m-%d')
@@ -221,7 +221,7 @@ if btn_processar:
                         nova_p = tp['p_atual'] + i
                         desc_p = f"{tp['desc']} ({nova_p}/{tp['p_total']})"
                         
-                        # Gerar hash único para a parcela futura
+                        # Gerar hash único (importante para não ser ignorado pelo banco depois)
                         h_raw = f"{nova_data}{tp['valor']}{desc_p}{tp['banco']}{usuario_atual}"
                         h = hashlib.md5(h_raw.encode()).hexdigest()
                         
@@ -234,12 +234,18 @@ if btn_processar:
                             "hash": h
                         })
                     
-                    # Adiciona ao dataframe existente
-                    if st.session_state.df_sms_preview is not None:
-                        df_adicional = pd.DataFrame(novas_parcelas)
-                        st.session_state.df_sms_preview = pd.concat([st.session_state.df_sms_preview, df_adicional]).sort_values("data")
-                        
-                    del st.session_state.transacao_parcelada # Limpa o aviso
+                    # --- A SOLUÇÃO ESTÁ AQUI ---
+                    # Pegamos o que já existe no estado da sessão
+                    df_atual = st.session_state.df_sms_preview
+                    df_novas = pd.DataFrame(novas_parcelas)
+                    
+                    # Concatenamos e salvamos de volta no session_state ANTES do rerun
+                    st.session_state.df_sms_preview = pd.concat([df_atual, df_novas], ignore_index=True).sort_values("data", ascending=False)
+                    
+                    # Limpamos o aviso para ele sumir da tela
+                    del st.session_state.transacao_parcelada
+                    
+                    # Agora o rerun vai carregar o script e ler o df_sms_preview já atualizado
                     st.rerun()
 
 # --------------------------------------------------
