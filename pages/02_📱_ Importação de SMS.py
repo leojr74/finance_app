@@ -210,8 +210,8 @@ if btn_processar:
             
             with st.container(border=True):
                 st.warning(f"💳 **Parcelamento Detectado:** {tp['desc']}")
-                st.info(f"📅 **Compra parcelada identificada:** {tp['desc']} ({tp['p_atual']}/{tp['p_total']})")                
-
+                st.write(f"Identificamos a parcela {tp['p_atual']} de {tp['p_total']}. Deseja projetar as próximas?")
+                
                 if st.button(f"⏩ Lançar as {tp['p_total'] - tp['p_atual']} parcelas restantes?"):
                     novas_parcelas = []
                     data_base = datetime.strptime(tp['data_origem'], '%Y-%m-%d')
