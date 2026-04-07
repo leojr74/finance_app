@@ -55,6 +55,47 @@ texto_copiado = st.text_area(
 
 btn_processar = st.button("🔍 Processar SMS", type="primary", width = 'stretch')
 
+if "info_parcelamento" in st.session_state and st.session_state.info_parcelamento["ativa"]:
+    p = st.session_state.info_parcelamento
+    st.warning(f"💳 **Compra Parcelada Detectada:** {p['desc']} (Parcela {p['atual']} de {p['total']})")
+    
+    col1, col2 = st.columns(2)
+    if col1.button("➕ Lançar todas as parcelas restantes"):
+        novas_parcelas = []
+        data_base = datetime.strptime(p['data_origem'], '%Y-%m-%d')
+        
+        # Loop para criar as parcelas que faltam (da próxima até a última)
+        for i in range(1, p['total'] - p['atual'] + 1):
+            # Adiciona 1 mês para cada parcela subsequente
+            nova_data = (data_base + pd.DateOffset(months=i)).strftime('%Y-%m-%d')
+            nova_p = p['atual'] + i
+            
+            # Gerar novo hash para cada parcela futura
+            h_raw = f"{nova_data}{p['valor']}{p['desc']}{nova_p}{p['banco']}{usuario_atual}"
+            h = hashlib.md5(h_raw.encode()).hexdigest()
+            
+            novas_parcelas.append({
+                "data": nova_data,
+                "data_obj": datetime.strptime(nova_data, '%Y-%m-%d').date(),
+                "descricao": f"{p['desc']} ({nova_p}/{p['total']})",
+                "valor": p['valor'],
+                "banco": p['banco'],
+                "hash": h
+            })
+        
+        # Concatena com o que já estava no preview
+        st.session_state.df_sms_preview = pd.concat([
+            st.session_state.df_sms_preview, 
+            pd.DataFrame(novas_parcelas)
+        ]).sort_values("data")
+        
+        st.session_state.info_parcelamento["ativa"] = False
+        st.rerun()
+
+    if col2.button("🚫 Apenas esta parcela"):
+        st.session_state.info_parcelamento["ativa"] = False
+        st.rerun()
+        
 if btn_processar:
     conteudo = ""
     
@@ -115,21 +156,27 @@ if btn_processar:
                 data_full = match_bradesco.group(1)
                 valor_str = match_bradesco.group(2).replace('.', '').replace(',', '.')
                 estabelecimento_raw = match_bradesco.group(3).strip().upper()
-                status = "APROVADA"
                 data_iso = datetime.strptime(data_full, "%d/%m/%Y").strftime('%Y-%m-%d')
                 
                 # Identificar parcelas (ex: 08DE10)
                 match_parcela = re.search(r"(\d{2})DE(\d{2})", estabelecimento_raw)
                 
                 if match_parcela:
-                    parcela_atual = int(match_parcela.group(1))
-                    total_parcelas = int(match_parcela.group(2))
-                    # Remove a info de parcela do nome do estabelecimento para ficar mais limpo
-                    estabelecimento = re.sub(r"AUT\*\d{2}DE\d{2}", "", estabelecimento_raw).strip()
+                    p_atual = int(match_parcela.group(1))
+                    p_total = int(match_parcela.group(2))
+                    desc_limpa = re.sub(r"AUT\*\d{2}DE\d{2}", "", estabelecimento_raw).strip()
                     
-                    # Opcional: Adicionar lógica para sugerir parcelas futuras
-                    # Por enquanto, vamos marcar na descrição para você saber que é a 8/10
-                    estabelecimento = f"{estabelecimento} ({parcela_atual}/{total_parcelas})"
+                    # Guardamos metadados para o alerta na UI
+                    st.session_state.info_parcelamento = {
+                        "ativa": True,
+                        "atual": p_atual,
+                        "total": p_total,
+                        "valor": float(valor_str),
+                        "desc": desc_limpa,
+                        "data_origem": data_iso,
+                        "banco": MAPA_SMS.get(banco_raw)
+                    }
+                    estabelecimento = f"{desc_limpa} ({p_atual}/{p_total})"
                 else:
                     estabelecimento = estabelecimento_raw
 
