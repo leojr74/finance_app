@@ -15,22 +15,18 @@ st.set_page_config(
     layout="wide"
 )
 
-
 usuario_atual = check_login()
-
-
 apply_global_style()
 
 st.title("📱 Importação de SMS")
 
-# --- INICIALIZAÇÃO DE ESTADOS (O SEGREDO PARA LIMPAR O CAMPO) ---
+# --- INICIALIZAÇÃO DE ESTADOS ---
 if "input_counter" not in st.session_state:
     st.session_state.input_counter = 0
 
 if "df_sms_preview" not in st.session_state:
     st.session_state.df_sms_preview = None
 
-# Mapeamento de Bancos
 MAPA_SMS = {
     "CAIXA": "CARTÃO CAIXA",
     "ITAU": "CARTÃO ITAÚ",
@@ -40,306 +36,184 @@ MAPA_SMS = {
     "AMAZON": "CARTÃO AMAZON"
 }
 
-# --------------------------------------------------
-# Entrada de Dados
-# --------------------------------------------------
+# --- ENTRADA DE DADOS ---
 uploaded_sms = st.file_uploader("Upload do arquivo .txt exportado", type="txt")
-
-# A chave (key) dinâmica para limpar o campo de texto
 texto_copiado = st.text_area(
-    "Ou cole o texto aqui (Mobile Friendly):", 
+    "Ou cole o texto aqui:", 
     height=150, 
-    placeholder="Cole as mensagens aqui...",
     key=f"sms_input_{st.session_state.input_counter}"
 )
 
-btn_processar = st.button("🔍 Processar SMS", type="primary", width = 'stretch')
+btn_processar = st.button("🔍 Processar SMS", type="primary", use_container_width=True)
 
-if "info_parcelamento" in st.session_state and st.session_state.info_parcelamento["ativa"]:
-    p = st.session_state.info_parcelamento
-    st.warning(f"💳 **Compra Parcelada Detectada:** {p['desc']} (Parcela {p['atual']} de {p['total']})")
-    
-    col1, col2 = st.columns(2)
-    if col1.button("➕ Lançar todas as parcelas restantes"):
-        novas_parcelas = []
-        data_base = datetime.strptime(p['data_origem'], '%Y-%m-%d')
-        
-        # Loop para criar as parcelas que faltam (da próxima até a última)
-        for i in range(1, p['total'] - p['atual'] + 1):
-            # Adiciona 1 mês para cada parcela subsequente
-            nova_data = (data_base + pd.DateOffset(months=i)).strftime('%Y-%m-%d')
-            nova_p = p['atual'] + i
-            
-            # Gerar novo hash para cada parcela futura
-            h_raw = f"{nova_data}{p['valor']}{p['desc']}{nova_p}{p['banco']}{usuario_atual}"
-            h = hashlib.md5(h_raw.encode()).hexdigest()
-            
-            novas_parcelas.append({
-                "data": nova_data,
-                "data_obj": datetime.strptime(nova_data, '%Y-%m-%d').date(),
-                "descricao": f"{p['desc']} ({nova_p}/{p['total']})",
-                "valor": p['valor'],
-                "banco": p['banco'],
-                "hash": h
-            })
-        
-        # Concatena com o que já estava no preview
-        st.session_state.df_sms_preview = pd.concat([
-            st.session_state.df_sms_preview, 
-            pd.DataFrame(novas_parcelas)
-        ]).sort_values("data")
-        
-        st.session_state.info_parcelamento["ativa"] = False
-        st.rerun()
-
-    if col2.button("🚫 Apenas esta parcela"):
-        st.session_state.info_parcelamento["ativa"] = False
-        st.rerun()
-
+# --------------------------------------------------
+# 1. PROCESSAMENTO DO TEXTO
+# --------------------------------------------------
 if btn_processar:
-    conteudo = ""
+    conteudo = uploaded_sms.getvalue().decode("utf-8") if uploaded_sms else texto_copiado
     
-    # --- LOGICA DE PRIORIDADE CORRIGIDA ---
-    if uploaded_sms is not None:
-        # Se houver arquivo, lê o conteúdo dele
-        conteudo = uploaded_sms.getvalue().decode("utf-8")
-    elif texto_copiado:
-        # Se não houver arquivo, tenta o texto colado
-        conteudo = texto_copiado
-
     if not conteudo:
-        st.error("⚠️ Por favor, faça o upload de um arquivo ou cole o texto antes de processar.")
+        st.error("⚠️ Sem conteúdo para processar.")
     else:
-        # O split deve ser feito por uma regex que aceite variações de traços
-        # Alguns sistemas exportam com mais ou menos traços
-        blocos = re.split(r"-{10,}", conteudo) 
+        blocos = re.split(r"-{5,}", conteudo) 
         lista_transacoes = []
         
+        if "transacao_parcelada" in st.session_state:
+            del st.session_state.transacao_parcelada
+
         for bloco in blocos:
-            if not bloco.strip(): continue
+            bloco = bloco.strip()
+            if not bloco: continue
             
-            match_meta = re.search(r"Recebido de .+ em (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})", bloco)
-            
-            # --- PADRÃO 1: CAIXA, ITAU, NUBANK ---
-            match_padrao = re.search(r"(\w+): Compra (aprovada|CANCELADA|no) (.*?) R\$ ([\d\.,]+) (\d{2}/\d{2})", bloco, re.IGNORECASE)
-            
-            # --- PADRÃO 2: CARTÃO AMAZON ---
-            match_amazon = re.search(r"CARTAO (AMAZON):.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$([\d\.,]+), (.*?)\.", bloco, re.IGNORECASE)
+            match_meta = re.search(r"(\d{2}:\d{2})", bloco)
+            hora_min = match_meta.group(1) if match_meta else datetime.now().strftime("%H:%M")
 
-            # --- PADRÃO 3: BRADESCO (NOVO) ---
-            match_bradesco = re.search(r"BRADESCO.*?:.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$ ([\d\.,]+) (.*?)\.", bloco, re.IGNORECASE)
+            data_iso, valor_num, estabel, banco_ref, status = None, None, None, None, "APROVADA"
 
-            # Inicializa variáveis para evitar o NameError
-            status = "APROVADA" 
+            # REGEX CAIXA PARCELADA
+            m_caixa_p = re.search(r"CAIXA:.*?Compra aprovada em (.*?) R\$\s*([\d\.,]+)\s+em\s+(\d+)\s+vezes,\s+(\d{2}/\d{2})", bloco, re.IGNORECASE | re.DOTALL)
+            # REGEX BRADESCO
+            m_bradesco = re.search(r"BRADESCO.*?:.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$ ([\d\.,]+) (.*?)\.", bloco, re.IGNORECASE)
+            # REGEX PADRÃO GERAL
+            m_geral = re.search(r"(\w+): Compra (aprovada|CANCELADA|no) (.*?) R\$\s*([\d\.,]+) (\d{2}/\d{2})", bloco, re.IGNORECASE)
 
-            if match_padrao:
-                banco_raw = match_padrao.group(1).upper()
-                status = match_padrao.group(2).upper()
-                estabelecimento = match_padrao.group(3).strip().upper()
-                valor_str = match_padrao.group(4).replace('.', '').replace(',', '.')
-                data_sms = match_padrao.group(5)
-                ano_atual = datetime.now().year
-                data_iso = datetime.strptime(f"{data_sms}/{ano_atual}", "%d/%m/%Y").strftime('%Y-%m-%d')
-            
-            elif match_amazon:
-                banco_raw = match_amazon.group(1).upper()
-                data_full = match_amazon.group(2)
-                valor_str = match_amazon.group(3).replace('.', '').replace(',', '.')
-                estabelecimento = match_amazon.group(4).strip().upper()
-                data_iso = datetime.strptime(data_full, "%d/%m/%Y").strftime('%Y-%m-%d')
-
-            elif match_bradesco:
-                banco_raw = "BRADESCO"
-                data_full = match_bradesco.group(1)
-                valor_str = match_bradesco.group(2).replace('.', '').replace(',', '.')
-                estab_raw = match_bradesco.group(3).strip().upper()
-                data_iso = datetime.strptime(data_full, "%d/%m/%Y").strftime('%Y-%m-%d')
+            if m_caixa_p:
+                banco_ref = "CAIXA"
+                total_p = int(m_caixa_p.group(3))
+                v_total = float(m_caixa_p.group(2).replace('.', '').replace(',', '.'))
                 
-                # Lógica de Parcelamento Bradesco
-                match_p = re.search(r"AUT\*(\d{2})DE(\d{2})", estab_raw)
-                if match_p:
-                    p_atual, p_total = int(match_p.group(1)), int(match_p.group(2))
-                    estabelecimento = f"{re.sub(r'AUT\*\d{2}DE\d{2}', '', estab_raw).strip()} ({p_atual}/{p_total})"
-                    
-                    # Salva no estado para perguntar depois
+                # Lógica de divisão com resto na primeira
+                parcela_comum = round(v_total / total_p, 2)
+                diferenca = round(v_total - (parcela_comum * total_p), 2)
+                valor_primeira = round(parcela_comum + diferenca, 2)
+                
+                valor_num = valor_primeira
+                estabel_limpo = m_caixa_p.group(1).strip().upper()
+                estabel = f"{estabel_limpo} (1/{total_p})"
+                dt_sms = m_caixa_p.group(4)
+                data_iso = datetime.strptime(f"{dt_sms}/{datetime.now().year}", "%d/%m/%Y").strftime('%Y-%m-%d')
+                
+                st.session_state.transacao_parcelada = {
+                    "data_origem": data_iso, 
+                    "valor": valor_primeira,  # Valor da parcela atual (1ª)
+                    "valor_comum": parcela_comum, # Valor das próximas
+                    "desc": estabel_limpo,
+                    "p_atual": 1, "p_total": total_p, "banco": MAPA_SMS["CAIXA"]
+                }
+
+            elif m_bradesco:
+                banco_ref = "BRADESCO"
+                data_iso = datetime.strptime(m_bradesco.group(1), "%d/%m/%Y").strftime('%Y-%m-%d')
+                valor_num = float(m_bradesco.group(2).replace('.', '').replace(',', '.'))
+                estabel_raw = m_bradesco.group(3).strip().upper()
+                m_p = re.search(r"AUT\*(\d{2})DE(\d{2})", estabel_raw)
+                if m_p:
+                    p_at, p_tot = int(m_p.group(1)), int(m_p.group(2))
+                    estabel_limpo = re.sub(r'AUT\*\d{2}DE\d{2}', '', estabel_raw).strip()
+                    estabel = f"{estabel_limpo} ({p_at}/{p_tot})"
                     st.session_state.transacao_parcelada = {
-                        "data_origem": data_iso,
-                        "valor": float(valor_str),
-                        "desc": re.sub(r'AUT\*\d{2}DE\d{2}', '', estab_raw).strip(),
-                        "p_atual": p_atual,
-                        "p_total": p_total,
-                        "banco": MAPA_SMS.get(banco_raw, "BRADESCO")
+                        "data_origem": data_iso, "valor": valor_num, "desc": estabel_limpo,
+                        "p_atual": p_at, "p_total": p_tot, "banco": MAPA_SMS["BRADESCO"]
                     }
                 else:
-                    estabelecimento = estab_raw
-            else:
-                continue
+                    estabel = estabel_raw
 
-            # --- PROCESSAMENTO COMUM (A partir daqui o código segue igual para ambos) ---
-            if match_meta:
-                hora_min = match_meta.group(2)
-            else:
-                hora_min = datetime.now().strftime("%H:%M")
+            elif m_geral:
+                banco_ref = m_geral.group(1).upper()
+                status = m_geral.group(2).upper()
+                estabel = m_geral.group(3).strip().upper()
+                valor_num = float(m_geral.group(4).replace('.', '').replace(',', '.'))
+                dt_sms = m_geral.group(5)
+                data_iso = datetime.strptime(f"{dt_sms}/{datetime.now().year}", "%d/%m/%Y").strftime('%Y-%m-%d')
 
-            banco_final = MAPA_SMS.get(banco_raw, f"CARTÃO {banco_raw}")
-            valor_num = float(valor_str)
-            
-            if status == "CANCELADA" or "ESTORNO" in bloco.upper():
-                valor_num = -abs(valor_num)
-            
-            h_raw = f"{data_iso}{valor_num}{estabelecimento}{hora_min}{banco_final}{usuario_atual}"
-            h = hashlib.md5(h_raw.encode()).hexdigest()
-            
-            lista_transacoes.append({
-                "data": data_iso,
-                "data_obj": datetime.strptime(data_iso, '%Y-%m-%d').date(),
-                "descricao": estabelecimento,
-                "valor": valor_num,
-                "banco": banco_final,
-                "hash": h
-            })
+            if data_iso:
+                banco_final = MAPA_SMS.get(banco_ref, f"CARTÃO {banco_ref}")
+                if status == "CANCELADA" or "ESTORNO" in bloco.upper():
+                    valor_num = -abs(valor_num)
+                
+                h = hashlib.md5(f"{data_iso}{valor_num}{estabel}{hora_min}{banco_final}{usuario_atual}".encode()).hexdigest()
+                lista_transacoes.append({
+                    "data": data_iso, "data_obj": datetime.strptime(data_iso, '%Y-%m-%d').date(),
+                    "descricao": estabel, "valor": valor_num, "banco": banco_final, "hash": h
+                })
 
         if lista_transacoes:
             st.session_state.df_sms_preview = pd.DataFrame(lista_transacoes).sort_values("data", ascending=False)
             st.success(f"✅ {len(lista_transacoes)} transações processadas!")
         else:
-            st.error("❌ Formato de SMS não reconhecido.")
-
-        if "transacao_parcelada" in st.session_state:
-            tp = st.session_state.transacao_parcelada
-            
-            with st.container(border=True):
-                st.warning(f"💳 **Parcelamento Detectado:** {tp['desc']}")
-                st.write(f"Identificamos a parcela {tp['p_atual']} de {tp['p_total']}. Deseja projetar as próximas?")
-
-                if st.button(f"⏩ Lançar as {tp['p_total'] - tp['p_atual']} parcelas restantes?"):
-                    novas_parcelas = []
-                    data_base = datetime.strptime(tp['data_origem'], '%Y-%m-%d')
-                    
-                    for i in range(1, tp['p_total'] - tp['p_atual'] + 1):
-                        nova_data = (data_base + pd.DateOffset(months=i)).strftime('%Y-%m-%d')
-                        nova_p = tp['p_atual'] + i
-                        desc_p = f"{tp['desc']} ({nova_p}/{tp['p_total']})"
-                        
-                        # Gerar hash único (importante para não ser ignorado pelo banco depois)
-                        h_raw = f"{nova_data}{tp['valor']}{desc_p}{tp['banco']}{usuario_atual}"
-                        h = hashlib.md5(h_raw.encode()).hexdigest()
-                        
-                        novas_parcelas.append({
-                            "data": nova_data,
-                            "data_obj": datetime.strptime(nova_data, '%Y-%m-%d').date(),
-                            "descricao": desc_p,
-                            "valor": tp['valor'],
-                            "banco": tp['banco'],
-                            "hash": h
-                        })
-                    
-                    # --- A SOLUÇÃO ESTÁ AQUI ---
-                    # Pegamos o que já existe no estado da sessão
-                    df_atual = st.session_state.df_sms_preview
-                    df_novas = pd.DataFrame(novas_parcelas)
-                    
-                    # Concatenamos e salvamos de volta no session_state ANTES do rerun
-                    st.session_state.df_sms_preview = pd.concat([df_atual, df_novas], ignore_index=True).sort_values("data", ascending=False)
-                    
-                    # Limpamos o aviso para ele sumir da tela
-                    del st.session_state.transacao_parcelada
-                    
-                    # Agora o rerun vai carregar o script e ler o df_sms_preview já atualizado
-                    st.rerun()
+            st.warning("⚠️ Nenhum padrão reconhecido.")
 
 # --------------------------------------------------
-# Área de Visualização e Salvamento
+# 2. AVISO DE PARCELAMENTO
+# --------------------------------------------------
+if "transacao_parcelada" in st.session_state:
+    tp = st.session_state.transacao_parcelada
+    with st.container(border=True):
+        st.warning(f"💳 **Compra Parcelada:** {tp['desc']}")
+        # Aqui corrigimos o erro: usamos .get() ou as chaves novas
+        v_exibicao = tp.get('valor', 0)
+        st.write(f"Valor da Parcela Atual: **R$ {v_exibicao:.2f}**")
+        
+        if st.button(f"⏩ Projetar as {tp['p_total'] - tp['p_atual']} parcelas restantes?"):
+            novas = []
+            base_dt = datetime.strptime(tp['data_origem'], '%Y-%m-%d')
+            
+            for i in range(1, tp['p_total'] - tp['p_atual'] + 1):
+                dt_p = (base_dt + pd.DateOffset(months=i)).strftime('%Y-%m-%d')
+                n_p = tp['p_atual'] + i
+                desc_p = f"{tp['desc']} ({n_p}/{tp['p_total']})"
+                
+                # Se for Caixa, usa valor_comum. Se não (Bradesco), usa o valor padrão.
+                v_prox = tp.get('valor_comum', tp['valor'])
+                
+                h_p = hashlib.md5(f"{dt_p}{v_prox}{desc_p}{tp['banco']}{usuario_atual}".encode()).hexdigest()
+                novas.append({
+                    "data": dt_p, "data_obj": datetime.strptime(dt_p, '%Y-%m-%d').date(),
+                    "descricao": desc_p, "valor": v_prox, "banco": tp['banco'], "hash": h_p
+                })
+            
+            st.session_state.df_sms_preview = pd.concat([st.session_state.df_sms_preview, pd.DataFrame(novas)], ignore_index=True)
+            del st.session_state.transacao_parcelada
+            st.rerun()
+
+# --------------------------------------------------
+# 3. VISUALIZAÇÃO E SALVAMENTO
 # --------------------------------------------------
 if st.session_state.df_sms_preview is not None:
     df_sms = st.session_state.df_sms_preview
-
     st.markdown("### Prévia das Transações")
-    st.dataframe(
-        df_sms[["data", "descricao", "valor", "banco"]],
-        width = 'stretch',
-        hide_index=True,
-        column_config={
-            "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
-            "valor": st.column_config.NumberColumn("R$", format="%.2f")
-        }
-    )
-if st.button("💾 Salvar no Banco de Dados", use_container_width=True):
-    regras_usuario = carregar_regras_db(usuario_atual)
-    try:
-        engine = get_engine()
-        
-        # 1. Carrega dados para comparação
-        df_db = carregar_transacoes(usuario_atual)
-        
-        novos_para_inserir = []
-        count_manual = 0
-        count_hash = 0
+    st.dataframe(df_sms[["data", "descricao", "valor", "banco"]].sort_values("data", ascending=False), use_container_width=True, hide_index=True)
 
-        # Preparação de sets para comparação rápida
-        if not df_db.empty:
-            # Criamos uma chave única (Data, Valor, Banco) para detectar duplicatas manuais
-            db_keys = set(
-                (pd.to_datetime(r['data']).date(), round(float(r['valor']), 2), str(r['banco']).upper()) 
-                for _, r in df_db.iterrows()
-            )
-            hashes_existentes = set(df_db['hash_fatura'].dropna().unique())
-        else:
-            db_keys = set()
-            hashes_existentes = set()
-
-        # 2. Loop de Validação
-        for _, row in df_sms.iterrows():
-            # Validação 1: Já importado via Hash?
-            if row['hash'] in hashes_existentes:
-                count_hash += 1
-                continue
+    if st.button("💾 Salvar no Banco de Dados", use_container_width=True):
+        regras_usuario = carregar_regras_db(usuario_atual)
+        try:
+            engine = get_engine()
+            df_db = carregar_transacoes(usuario_atual)
+            novos_para_inserir = []
             
-            # Validação 2: Similaridade (Manual/SMS)
-            chave_atual = (row['data_obj'], round(float(row['valor']), 2), str(row['banco']).upper())
-            if chave_atual in db_keys:
-                count_manual += 1
-                continue 
+            hashes_existentes = set(df_db['hash_fatura'].dropna().unique()) if not df_db.empty else set()
+            db_keys = set((pd.to_datetime(r['data']).date(), round(float(r['valor']), 2), str(r['banco']).upper()) for _, r in df_db.iterrows()) if not df_db.empty else set()
 
-            # Adiciona à lista como DICIONÁRIO para o SQLAlchemy
-            categoria_auto = find_category(row['descricao'], regras_usuario)
+            for _, row in df_sms.iterrows():
+                if row['hash'] in hashes_existentes: continue
+                if (row['data_obj'], round(float(row['valor']), 2), str(row['banco']).upper()) in db_keys: continue 
 
-            novos_para_inserir.append({
-                "dat": row['data'], 
-                "des": row['descricao'], 
-                "cat": categoria_auto, 
-                "val": row['valor'], 
-                "bnc": row['banco'], 
-                "uid": usuario_atual, 
-                "hsh": row['hash']
-            })
+                novos_para_inserir.append({
+                    "dat": row['data'], "des": row['descricao'], 
+                    "cat": find_category(row['descricao'], regras_usuario), 
+                    "val": row['valor'], "bnc": row['banco'], 
+                    "uid": usuario_atual, "hsh": row['hash']
+                })
 
-        # 3. Execução Final com SQLAlchemy
-        if novos_para_inserir:
-            query = text('''
-                INSERT INTO transacoes (data, descricao, categoria, valor, banco, user_id, hash_fatura) 
-                VALUES (:dat, :des, :cat, :val, :bnc, :uid, :hsh)
-            ''')
-            
-            with engine.begin() as conn_trans:
-                conn_trans.execute(query, novos_para_inserir)
-            
-            st.success(f"✅ {len(novos_para_inserir)} novas transações salvas!")
-            
-            # --- LIMPEZA AUTOMÁTICA ---
-            st.session_state.df_sms_preview = None
-            st.session_state.input_counter += 1
-            
-            if 'df_transacoes' in st.session_state:
-                del st.session_state.df_transacoes
-            
-            st.rerun()
-        else:
-            st.warning("Todas as transações já existem no banco.")
-
-        # Feedbacks informativos
-        if count_manual > 0: st.info(f"📌 {count_manual} já existiam (lançamento manual).")
-        if count_hash > 0: st.warning(f"🚫 {count_hash} já foram importadas via SMS.")
-
-    except Exception as e:
-        st.error(f"Erro ao salvar no banco: {e}")
+            if novos_para_inserir:
+                query = text("INSERT INTO transacoes (data, descricao, categoria, valor, banco, user_id, hash_fatura) VALUES (:dat, :des, :cat, :val, :bnc, :uid, :hsh)")
+                with engine.begin() as conn:
+                    conn.execute(query, novos_para_inserir)
+                st.success(f"✅ {len(novos_para_inserir)} transações salvas!")
+                st.session_state.df_sms_preview = None
+                st.session_state.input_counter += 1
+                st.rerun()
+            else:
+                st.warning("Todas as transações já existem no banco.")
+        except Exception as e:
+            st.error(f"Erro ao salvar: {e}")
