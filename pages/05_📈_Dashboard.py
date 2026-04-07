@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 import datetime
+import calendar
 from fpdf import FPDF
 import io
 from database import carregar_transacoes, get_gastos_fixos, carregar_regras_db
@@ -94,53 +95,67 @@ lista_permitida = (categorias_base.union(categorias_do_usuario).union(categorias
 # 6. Aplicamos o filtro no DataFrame do Dashboard
 df = df[df["categoria"].isin(lista_permitida)]
 
-# 4. LÓGICA DE DATAS
+# 4. LÓGICA DE DATAS (Atualizada)
 hoje = datetime.date.today()
-trinta_dias_atras = hoje - datetime.timedelta(days=30)
+primeiro_dia_mes = hoje.replace(day=1)
+ultimo_dia_mes = hoje.replace(day=calendar.monthrange(hoje.year, hoje.month)[1])
+
 limite_min = df["data"].min().date()
 limite_max = df["data"].max().date()
-data_inicio_padrao = max(trinta_dias_atras, limite_min)
-data_fim_padrao = min(hoje, limite_max)
 
-# 5. INTERFACE DE FILTROS
+if "periodo_datas" not in st.session_state:
+    trinta_dias_atras = hoje - datetime.timedelta(days=30)
+    st.session_state.periodo_datas = (max(trinta_dias_atras, limite_min), min(hoje, limite_max))
+
+# ---------------------------
+# 5. INTERFACE DE FILTROS (ALINHAMENTO SIMÉTRICO)
+# ---------------------------
 st.write("---")
-c1, c2, c3 = st.columns([1, 1, 1])
+
+# Criamos 3 colunas de tamanhos parecidos (o botão e o campo de data terão larguras similares)
+c1, c2, c3 = st.columns([1.5, 0.3, 1.5])
 
 with c1:
+    # Usamos label_visibility="collapsed" para remover o espaço vazio do rótulo
+    # e colocamos um st.write antes para manter o título
+    st.markdown("**Filtrar Período**")
     periodo = st.date_input(
-        "Período Selecionado",
-        value=(data_inicio_padrao, data_fim_padrao),
+        "Selecionar Período", # Texto ignorado visualmente, mas necessário para acessibilidade
+        value=st.session_state.periodo_datas,
         min_value=limite_min,
-        max_value=limite_max
+        max_value=limite_max,
+        format="DD/MM/YYYY",
+        label_visibility="collapsed" 
     )
+    st.session_state.periodo_datas = periodo
 
+with c2:
+    # Alinhamento do "OU" agora é mais simples sem o label do date_input
+    st.markdown("<p style='text-align: center; padding-top: 32px; font-weight: bold; opacity: 0.6;'>OU</p>", unsafe_allow_html=True)
+
+with c3:
+    st.markdown("**Atalho Rápido**")
+    if st.button("📅 Mês Atual", use_container_width=True):
+        st.session_state.periodo_datas = (primeiro_dia_mes, ultimo_dia_mes)
+        st.rerun()
+
+# Mantemos a lógica de extração do período exatamente como você já tinha:
 if isinstance(periodo, tuple):
     if len(periodo) == 2 and periodo[0] and periodo[1]:
-        # Intervalo completo
         data_inicio, data_fim = periodo
-
         df_filtrado = df[
             (df["data"].dt.date >= data_inicio) &
             (df["data"].dt.date <= data_fim)
         ].copy()
-
         txt_periodo_pdf = f"{data_inicio.strftime('%d/%m/%Y')} ate {data_fim.strftime('%d/%m/%Y')}"
-
-    elif len(periodo) == 1 or (len(periodo) == 2 and periodo[0] and not periodo[1]):
-        # Só data inicial selecionada (ou no meio da seleção)
+    elif len(periodo) == 1:
         data_sel = periodo[0]
-
         df_filtrado = df[df["data"].dt.date == data_sel].copy()
-
         txt_periodo_pdf = data_sel.strftime('%d/%m/%Y')
-
     else:
         st.stop()
-
 else:
-    # Caso venha como data única (segurança extra)
     data_sel = periodo
-
     df_filtrado = df[df["data"].dt.date == data_sel].copy()
     txt_periodo_pdf = data_sel.strftime('%d/%m/%Y')
 
