@@ -205,6 +205,43 @@ if btn_processar:
         else:
             st.error("❌ Formato de SMS não reconhecido.")
 
+        if "transacao_parcelada" in st.session_state:
+            tp = st.session_state.transacao_parcelada
+            
+            with st.container(border=True):
+                st.warning(f"💳 **Parcelamento Detectado:** {tp['desc']}")
+                st.info(f"📅 **Compra parcelada identificada:** {tp['desc']} ({tp['p_atual']}/{tp['p_total']})")                
+
+                if st.button(f"⏩ Lançar as {tp['p_total'] - tp['p_atual']} parcelas restantes?"):
+                    novas_parcelas = []
+                    data_base = datetime.strptime(tp['data_origem'], '%Y-%m-%d')
+                    
+                    for i in range(1, tp['p_total'] - tp['p_atual'] + 1):
+                        nova_data = (data_base + pd.DateOffset(months=i)).strftime('%Y-%m-%d')
+                        nova_p = tp['p_atual'] + i
+                        desc_p = f"{tp['desc']} ({nova_p}/{tp['p_total']})"
+                        
+                        # Gerar hash único para a parcela futura
+                        h_raw = f"{nova_data}{tp['valor']}{desc_p}{tp['banco']}{usuario_atual}"
+                        h = hashlib.md5(h_raw.encode()).hexdigest()
+                        
+                        novas_parcelas.append({
+                            "data": nova_data,
+                            "data_obj": datetime.strptime(nova_data, '%Y-%m-%d').date(),
+                            "descricao": desc_p,
+                            "valor": tp['valor'],
+                            "banco": tp['banco'],
+                            "hash": h
+                        })
+                    
+                    # Adiciona ao dataframe existente
+                    if st.session_state.df_sms_preview is not None:
+                        df_adicional = pd.DataFrame(novas_parcelas)
+                        st.session_state.df_sms_preview = pd.concat([st.session_state.df_sms_preview, df_adicional]).sort_values("data")
+                        
+                    del st.session_state.transacao_parcelada # Limpa o aviso
+                    st.rerun()
+
 # --------------------------------------------------
 # Área de Visualização e Salvamento
 # --------------------------------------------------
