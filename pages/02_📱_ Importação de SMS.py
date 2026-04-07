@@ -95,7 +95,7 @@ if "info_parcelamento" in st.session_state and st.session_state.info_parcelament
     if col2.button("🚫 Apenas esta parcela"):
         st.session_state.info_parcelamento["ativa"] = False
         st.rerun()
-        
+
 if btn_processar:
     conteudo = ""
     
@@ -118,19 +118,19 @@ if btn_processar:
         for bloco in blocos:
             if not bloco.strip(): continue
             
-            # 1. Tenta metadados do arquivo (Data/Hora de recebimento)
             match_meta = re.search(r"Recebido de .+ em (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})", bloco)
             
-            # --- PADRÃO 1: CAIXA, ITAU, NUBANK (O que você já tinha) ---
+            # --- PADRÃO 1: CAIXA, ITAU, NUBANK ---
             match_padrao = re.search(r"(\w+): Compra (aprovada|CANCELADA|no) (.*?) R\$ ([\d\.,]+) (\d{2}/\d{2})", bloco, re.IGNORECASE)
             
-            # --- PADRÃO 2: CARTÃO AMAZON (NOVO) ---
-            # Ex: CARTAO AMAZON: ... 31/03/2026 11:20. VALOR DE R$69,97, AMAZONMKTPLC*PURONUTRI.
+            # --- PADRÃO 2: CARTÃO AMAZON ---
             match_amazon = re.search(r"CARTAO (AMAZON):.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$([\d\.,]+), (.*?)\.", bloco, re.IGNORECASE)
 
             # --- PADRÃO 3: BRADESCO (NOVO) ---
-            # Ex: BRADESCO CARTOES: COMPRA APROVADA NO CARTAO FINAL 9808 EM 06/04/2026 17:18. VALOR DE R$ 110,00 BRADESCO AUT*08DE10      RIO DE JANEI.
             match_bradesco = re.search(r"BRADESCO.*?:.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$ ([\d\.,]+) (.*?)\.", bloco, re.IGNORECASE)
+
+            # Inicializa variáveis para evitar o NameError
+            status = "APROVADA" 
 
             if match_padrao:
                 banco_raw = match_padrao.group(1).upper()
@@ -138,50 +138,42 @@ if btn_processar:
                 estabelecimento = match_padrao.group(3).strip().upper()
                 valor_str = match_padrao.group(4).replace('.', '').replace(',', '.')
                 data_sms = match_padrao.group(5)
-                # Lógica de data abreviada (DD/MM)
                 ano_atual = datetime.now().year
                 data_iso = datetime.strptime(f"{data_sms}/{ano_atual}", "%d/%m/%Y").strftime('%Y-%m-%d')
             
             elif match_amazon:
                 banco_raw = match_amazon.group(1).upper()
-                data_full = match_amazon.group(2) # 31/03/2026
+                data_full = match_amazon.group(2)
                 valor_str = match_amazon.group(3).replace('.', '').replace(',', '.')
                 estabelecimento = match_amazon.group(4).strip().upper()
-                status = "APROVADA"
-                # Converte data completa (DD/MM/AAAA)
                 data_iso = datetime.strptime(data_full, "%d/%m/%Y").strftime('%Y-%m-%d')
-            
+
             elif match_bradesco:
                 banco_raw = "BRADESCO"
                 data_full = match_bradesco.group(1)
                 valor_str = match_bradesco.group(2).replace('.', '').replace(',', '.')
-                estabelecimento_raw = match_bradesco.group(3).strip().upper()
+                estab_raw = match_bradesco.group(3).strip().upper()
                 data_iso = datetime.strptime(data_full, "%d/%m/%Y").strftime('%Y-%m-%d')
                 
-                # Identificar parcelas (ex: 08DE10)
-                match_parcela = re.search(r"(\d{2})DE(\d{2})", estabelecimento_raw)
-                
-                if match_parcela:
-                    p_atual = int(match_parcela.group(1))
-                    p_total = int(match_parcela.group(2))
-                    desc_limpa = re.sub(r"AUT\*\d{2}DE\d{2}", "", estabelecimento_raw).strip()
+                # Lógica de Parcelamento Bradesco
+                match_p = re.search(r"AUT\*(\d{2})DE(\d{2})", estab_raw)
+                if match_p:
+                    p_atual, p_total = int(match_p.group(1)), int(match_p.group(2))
+                    estabelecimento = f"{re.sub(r'AUT\*\d{2}DE\d{2}', '', estab_raw).strip()} ({p_atual}/{p_total})"
                     
-                    # Guardamos metadados para o alerta na UI
-                    st.session_state.info_parcelamento = {
-                        "ativa": True,
-                        "atual": p_atual,
-                        "total": p_total,
-                        "valor": float(valor_str),
-                        "desc": desc_limpa,
+                    # Salva no estado para perguntar depois
+                    st.session_state.transacao_parcelada = {
                         "data_origem": data_iso,
-                        "banco": MAPA_SMS.get(banco_raw)
+                        "valor": float(valor_str),
+                        "desc": re.sub(r'AUT\*\d{2}DE\d{2}', '', estab_raw).strip(),
+                        "p_atual": p_atual,
+                        "p_total": p_total,
+                        "banco": MAPA_SMS.get(banco_raw, "BRADESCO")
                     }
-                    estabelecimento = f"{desc_limpa} ({p_atual}/{p_total})"
                 else:
-                    estabelecimento = estabelecimento_raw
-
+                    estabelecimento = estab_raw
             else:
-                continue # Pula se não bater com nenhum padrão
+                continue
 
             # --- PROCESSAMENTO COMUM (A partir daqui o código segue igual para ambos) ---
             if match_meta:
