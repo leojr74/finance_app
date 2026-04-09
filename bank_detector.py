@@ -64,6 +64,11 @@ def detect_bank(pdf_path):
             'NUBANK',
             'Nu Pagamentos',
         ],
+        'picpay': [
+            'PICPAY',
+            'PicPay Bank',
+            'PicPay Mastercard',
+        ],
         
     }
     
@@ -99,6 +104,10 @@ def detect_bank(pdf_path):
         'nubank': [
             r'NUBANK',
             r'TRANSAÇÕES DE',
+        ],
+        'picpay': [
+            r'PICPAY',
+            r'Transações Nacionais',
         ],
     }
     

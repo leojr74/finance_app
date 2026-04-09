@@ -11,6 +11,7 @@ from parsers import (
     itau,
     mercado_pago,
     nubank,
+    picpay,
     santander
 )
 
@@ -25,6 +26,7 @@ PARSERS = {
     "itau": itau.extract_transactions,
     "mercado_pago": mercado_pago.extract_transactions,
     "nubank": nubank.extract_transactions,
+    "picpay": picpay.extract_transactions,
     "santander": santander.extract_transactions,
 }
 
