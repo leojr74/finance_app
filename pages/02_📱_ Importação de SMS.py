@@ -70,7 +70,9 @@ if btn_processar:
 
             data_iso, valor_num, estabel, banco_ref, status = None, None, None, None, "APROVADA"
 
-            # REGEX CAIXA PARCELADA
+            # REGEX CAIXA SIMPLES - NOVO PADRÃO (compra sem parcelamento)
+            m_caixa = re.search(r"CAIXA:\s+Compra aprovada em (.+?), R\$\s+([\d\.,]+),\s+(\d{2}/\d{2})\s+às\s+(\d{2}:\d{2})", bloco, re.IGNORECASE)
+            # REGEX CAIXA PARCELADA - PADRÃO ANTIGO (mantido para compatibilidade)
             m_caixa_p = re.search(r"CAIXA:.*?Compra aprovada em (.*?) R\$\s*([\d\.,]+)\s+em\s+(\d+)\s+vezes,\s+(\d{2}/\d{2})", bloco, re.IGNORECASE | re.DOTALL)
             # REGEX BRADESCO
             m_bradesco = re.search(r"BRADESCO.*?:.*? (\d{2}/\d{2}/\d{4}).*? VALOR DE R\$ ([\d\.,]+) (.*?)\.", bloco, re.IGNORECASE)
@@ -100,6 +102,16 @@ if btn_processar:
                     "desc": estabel_limpo,
                     "p_atual": 1, "p_total": total_p, "banco": MAPA_SMS["CAIXA"]
                 }
+
+            elif m_caixa:
+                # NOVO PADRÃO - Compra CAIXA simples (sem parcelamento)
+                banco_ref = "CAIXA"
+                estabel_limpo = m_caixa.group(1).strip().upper()
+                estabel = estabel_limpo
+                valor_num = float(m_caixa.group(2).replace('.', '').replace(',', '.'))
+                dt_sms = m_caixa.group(3)
+                hora_min = m_caixa.group(4)  # Atualiza hora_min com a captura do regex
+                data_iso = datetime.strptime(f"{dt_sms}/{datetime.now().year}", "%d/%m/%Y").strftime('%Y-%m-%d')
 
             elif m_bradesco:
                 banco_ref = "BRADESCO"
